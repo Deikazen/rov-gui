@@ -1,0 +1,78 @@
+/* ── HEADER / TOP BAR ── */
+#top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+#top-bar .team-info {
+    display: flex;
+    flex-direction: column;
+}
+
+#top-bar .team-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: 0.5px;
+}
+
+#top-bar .uni-name {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+#top-bar .title-center {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--blue);
+    letter-spacing: 2px;
+    text-align: center;
+}
+
+#top-bar .title-center span {
+    display: block;
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    margin-top: 2px;
+    font-weight: 400;
+}
+
+#clock {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-main);
+    text-align: right;
+}
+
+#date-display {
+    font-size: 14px;
+    color: var(--text-muted);
+    text-align: right;
+    margin-top: 2px;
+}
+
+.team-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+}
+
+.team-logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.team-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROV Ground Control Station - Modular</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Modular CSS Styles -->
+    <link rel="stylesheet" href="./css/index.css">
+</head>
+
+<body>
+
+    <!-- Header / Top Bar -->
+    <div id="top-bar">
+        <div class="team-identity">
+            <div class="team-logo">
+                <img src="./SAGARA.jpeg" class="team-logo-img" alt="Team SAGARA Logo">
+            </div>
+            <div class="team-info">
+                <div class="team-name">TEAM SAGARA</div>
+                <div class="uni-name">INSTITUT TEKNOLOGI NASIONAL BANDUNG</div>
+            </div>
+        </div>
+        <div>
+            <div id="clock">00:00:00</div>
+            <div id="date-display">LOADING...</div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Grid -->
+    <div id="main-content">
+        <!-- Row 1: Cam 1, Cam 2, QR Code Detector -->
+        <div class="row">
+            <div class="panel cam-panel">
+                <div class="panel-header">CAMERA 01 — FRONT VIEW <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <div class="cam-feed-bg pool-1">
+                        <div class="cam-reticle">
+                            <div class="cam-crosshair"></div>
+                            <div class="cam-crosshair-v"></div>
+                        </div>
+                    </div>
+                    <div class="cam-timestamp" id="cam1-ts">00:00:00.000</div>
+                    <div class="cam-rec">
+                        <div class="cam-rec-dot"></div>REC
+                    </div>
+                    <div class="cam-timeline">
+                        <button class="cam-play-btn" type="button" onclick="toggleCameraReplay(1)" id="cam1-play">II</button>
+                        <input class="cam-slider" id="cam1-slider" type="range" min="0" max="100" value="0" oninput="seekCameraReplay(1, this.value)">
+                        <div class="cam-timecode" id="cam1-timecode">00:00 / 00:20</div>
+                    </div>
+                    <div class="cam-label-overlay">KOLAM 1 — LIVE</div>
+                </div>
+            </div>
+
+            <div class="panel cam-panel">
+                <div class="panel-header">CAMERA 02 — BOTTOM / SIDE VIEW <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <div class="cam-feed-bg pool-2">
+                        <div class="cam-reticle">
+                            <div class="cam-crosshair"></div>
+                            <div class="cam-crosshair-v"></div>
+                        </div>
+                    </div>
+                    <div class="cam-timestamp" id="cam2-ts">00:00:00.000</div>
+                    <div class="cam-rec">
+                        <div class="cam-rec-dot"></div>REC
+                    </div>
+                    <div class="cam-timeline">
+                        <button class="cam-play-btn" type="button" onclick="toggleCameraReplay(2)" id="cam2-play">II</button>
+                        <input class="cam-slider" id="cam2-slider" type="range" min="0" max="100" value="0" oninput="seekCameraReplay(2, this.value)">
+                        <div class="cam-timecode" id="cam2-timecode">00:00 / 00:20</div>
+                    </div>
+                    <div class="cam-label-overlay">KOLAM 2 — LIVE</div>
+                </div>
+            </div>
+
+            <div class="panel qr-panel">
+                <div class="panel-header">QR CODE DETECTOR <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <div style="text-align:center">
+                        <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px">DETECTED SIDE</div>
+                        <div class="qr-side-label" id="qr-side">A</div>
+                    </div>
+                    <div class="qr-valid-badge valid" id="qr-badge">VALID</div>
+                    <div class="qr-anim-box">
+                        <div class="qr-inner-grid" id="qr-grid"></div>
+                    </div>
+                    <div class="qr-info-row">
+                        <div>SCAN: <span id="qr-count">0047</span></div>
+                        <div>CONF: <span id="qr-conf">98.7%</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: Altitude Depth, Trajectory Map, ROV 3D Schematic -->
+        <div class="row">
+            <div class="panel alt-panel">
+                <div class="panel-header">ALTITUDE — DEPTH SENSOR <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <div class="alt-gauge-wrap">
+                        <div class="alt-gauge-track">
+                            <div class="alt-gauge-fill" id="alt-gauge-fill"></div>
+                        </div>
+                        <div style="font-size:9px; color:var(--text-muted); font-family:'JetBrains Mono'">0.0m</div>
+                    </div>
+                    <div class="alt-gauge-labels">
+                        <span>5.0</span><span>4.0</span><span>3.0</span><span>2.0</span><span>1.0</span><span>0.0</span>
+                    </div>
+                    <div class="alt-readout">
+                        <div class="alt-label">ALTITUDE</div>
+                        <div class="alt-value" id="alt-value">2.45</div>
+                        <div class="alt-unit">METERS</div>
+                        <div class="alt-danger" id="alt-danger">⚠ DANGER ZONE</div>
+                        <div style="margin-top:4px; font-size:10px; color:var(--text-muted);">
+                            MIN <span style="color:var(--text-main)" id="alt-min">0.20</span> | MAX <span style="color:var(--text-main)" id="alt-max">3.50</span>
+                        </div>
+                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px">
+                            RATE <span style="color:var(--amber); font-family:'JetBrains Mono'" id="alt-rate">+0.00</span> m/s
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel traj-panel">
+                <div class="panel-header">TRAJECTORY MAP — TOP-DOWN VIEW <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <canvas id="traj-canvas"></canvas>
+                </div>
+                <div class="traj-panel-footer">
+                    <button class="action-btn" id="btn-replay" onclick="replayTrajectory()">Replay Path</button>
+                    <button class="action-btn" id="btn-clear" onclick="clearPath()">Clear</button>
+                </div>
+            </div>
+
+            <div class="panel rov-panel">
+                <div class="panel-header">ROV SCHEMATIC — DESIGN VIEW <div class="dot"></div>
+                </div>
+                <div class="panel-body">
+                    <div id="rov-3d">
+                        <div class="rov-scene">
+                            <div class="rov-grid-plane"></div>
+                            <div class="rov-shadow"></div>
+                            <div class="rov-model" id="rov-model">
+                                <div class="rov-frame-3d"></div>
+                                <div class="rov-body-3d"></div>
+                                <div class="rov-nose-3d"></div>
+                                <div class="rov-camera-3d"></div>
+                                <div class="rov-thruster-3d t1"></div>
+                                <div class="rov-thruster-3d t2"></div>
+                                <div class="rov-thruster-3d t3"></div>
+                                <div class="rov-thruster-3d t4"></div>
+                                <div class="rov-thruster-3d t5"></div>
+                                <div class="rov-thruster-3d t6"></div>
+                                <div class="rov-gripper-3d" aria-label="Front lower gripper">
+                                    <div class="gripper-mount"></div>
+                                    <div class="gripper-bar"></div>
+                                    <div class="gripper-arm upper"></div>
+                                    <div class="gripper-arm lower"></div>
+                                    <div class="gripper-claw upper"></div>
+                                    <div class="gripper-claw lower"></div>
+                                </div>
+                            </div>
+                            <div class="axis-indicator" aria-label="ROV orientation axis indicator">
+                                <svg class="axis-svg" viewBox="0 0 104 104" role="img">
+                                    <line id="axis-x-line" x1="52" y1="52" x2="86" y2="52"></line>
+                                    <line id="axis-y-line" x1="52" y1="52" x2="52" y2="18"></line>
+                                    <line id="axis-z-line" x1="52" y1="52" x2="28" y2="28"></line>
+                                    <circle class="axis-origin-svg" cx="52" cy="52" r="4"></circle>
+                                    <text id="axis-x-label" x="94" y="52">X</text>
+                                    <text id="axis-y-label" x="52" y="10">Y</text>
+                                    <text id="axis-z-label" x="20" y="20">Z</text>
+                                </svg>
+                            </div>
+                            <div class="rov-axis-label">CSS 3D IMU LINK</div>
+                        </div>
+                    </div>
+                    <div class="imu-overlay">
+                        <div>ROLL <span id="imu-roll">+0.0°</span></div>
+                        <div>PITCH <span id="imu-pitch">+0.0°</span></div>
+                        <div>YAW <span id="imu-yaw">000.0°</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer Bar Controls & Telemetry -->
+    <div id="footer">
+        <div class="footer-item">
+            <span class="footer-label">MODE</span>
+            <button class="mode-toggle" id="mode-toggle" type="button" onclick="toggleMode()" aria-pressed="false">
+                <span class="mode-switch" aria-hidden="true"></span>
+                <span class="mode-text" id="mode-label">MANUAL</span>
+            </button>
+        </div>
+
+        <div class="footer-divider"></div>
+
+        <div class="footer-item">
+            <button class="action-btn emergency-btn" id="btn-emergency" type="button" onclick="toggleEmergency()">Emergency</button>
+        </div>
+
+        <div class="footer-divider"></div>
+
+        <div class="footer-item">
+            <span class="footer-label">LINK</span>
+            <div class="conn-dot connected" id="conn-dot"></div>
+            <span id="conn-label" style="font-weight: 500; color: var(--green)">CONNECTED</span>
+        </div>
+
+        <div class="footer-divider"></div>
+
+        <div class="footer-item">
+            <span class="footer-label">SENSORS</span>
+            <div class="sensor-badge sensor-ok" id="s-depth">DEPTH OK</div>
+            <div class="sensor-badge sensor-ok" id="s-imu">IMU OK</div>
+            <div class="sensor-badge sensor-ok" id="s-cam">CAM OK</div>
+        </div>
+
+        <div class="footer-divider"></div>
+
+        <div class="footer-item">
+            <span class="footer-label">LOG</span>
+            <div class="rec-indicator">
+                <div class="rec-dot inactive" id="rec-dot"></div>
+                <span id="rec-label" style="color: var(--text-muted)">STANDBY</span>
+            </div>
+            <button class="action-btn" id="btn-log" onclick="toggleLogging()">Start Log</button>
+        </div>
+
+        <div class="footer-divider"></div>
+
+        <div class="footer-item" style="margin-left:auto">
+            <button class="action-btn theme-toggle" id="btn-theme" onclick="toggleTheme()">Light</button>
+            <button class="action-btn" onclick="takeScreenshot()">Screenshot</button>
+            <button class="action-btn" id="btn-csv" style="display:none; margin-left:4px" onclick="downloadCSV()">Download CSV</button>
+        </div>
+
+        <div class="footer-item" style="font-size:11px; color:var(--text-muted); flex-direction:column; align-items:flex-end">
+            <span style="margin-top:2px">DEPTH: <span style="color:var(--blue); font-family:'JetBrains Mono'" id="footer-depth">2.45</span>m | TEMP: <span style="color:var(--amber); font-family:'JetBrains Mono'">24.7°C</span></span>
+        </div>
+    </div>
+
+    <!-- Result Modal -->
+    <div class="result-modal" id="result-modal" aria-hidden="true">
+        <div class="result-dialog">
+            <div class="result-header">
+                <div class="result-title" id="result-title">RESULT</div>
+                <button class="result-close" type="button" onclick="closeResultModal()">×</button>
+            </div>
+            <div class="result-body" id="result-body"></div>
+        </div>
+    </div>
+
+    <!-- Modular JS App -->
+    <script type="module" src="./js/app.js"></script>
+</body>
+
+</html>

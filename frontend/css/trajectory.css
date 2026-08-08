@@ -1,0 +1,25 @@
+/* ── TRAJECTORY MAP PANEL STYLES ── */
+.traj-panel .panel-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+#traj-canvas {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    width: 100%;
+    height: 100%;
+}
+
+.traj-panel-footer {
+    border-top: 1px solid var(--border);
+    padding: 8px 14px;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}

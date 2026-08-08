@@ -1,122 +1,203 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect } from 'react';
+import { useSimulation } from './hooks/useSimulation';
+import { Header } from './components/Header';
+import { CameraPanel } from './components/CameraPanel';
+import { QrPanel } from './components/QrPanel';
+import { AltitudePanel } from './components/AltitudePanel';
+import { TrajectoryPanel } from './components/TrajectoryPanel';
+import { RovSchematic } from './components/RovSchematic';
+import { FooterBar } from './components/FooterBar';
+import { ResultModal } from './components/ResultModal';
 
-function App() {
-  const [count, setCount] = useState(0)
+export function App() {
+  const {
+    timeString,
+    dateString,
+    camTimestamp,
+    mode,
+    emergencyActive,
+    theme,
+    connected,
+    logging,
+    logData,
+    altitude,
+    altPrev,
+    qrSide,
+    qrScanCount,
+    qrConf,
+    imu,
+    rovPos,
+    recordedPath,
+    isReplaying,
+    trajPath,
+    cams,
+    toggleCameraPlay,
+    seekCamera,
+    toggleMode,
+    toggleEmergency,
+    toggleTheme,
+    toggleLogging,
+    replayTrajectory,
+    clearPath
+  } = useSimulation();
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('RESULT');
+  const [screenshotUrl, setScreenshotUrl] = useState<string | undefined>();
+  const [screenshotFilename, setScreenshotFilename] = useState<string | undefined>();
+
+  // Full view panel controller init
+  useEffect(() => {
+    document.body.classList.toggle('light-theme', theme === 'light');
+    document.body.classList.toggle('emergency-active', emergencyActive);
+  }, [theme, emergencyActive]);
+
+  const handleDownloadCSV = () => {
+    if (logData.length === 0) return;
+    const headers = "timestamp,altitude_m,pos_x_m,pos_y_m,imu_roll_deg,imu_pitch_deg,imu_yaw_deg,qr_side,connected\n";
+    const rows = logData.map(r => `${r.timestamp},${r.altitude},${r.posX},${r.posY},${r.roll},${r.pitch},${r.yaw},${r.qrSide},${r.connected}`).join("\n");
+    const blob = new Blob([headers + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rov_telemetry_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setScreenshotUrl(undefined);
+    setScreenshotFilename(undefined);
+    setModalTitle('Automatic Data Log');
+    setModalOpen(true);
+  };
+
+  const handleScreenshot = () => {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `rov_gcs_${ts}.png`;
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+      navigator.mediaDevices.getDisplayMedia({ video: true })
+        .then(stream => {
+          const video = document.createElement('video');
+          video.srcObject = stream;
+          video.play().then(() => {
+            const cvs = document.createElement('canvas');
+            cvs.width = video.videoWidth;
+            cvs.height = video.videoHeight;
+            cvs.getContext('2d')?.drawImage(video, 0, 0);
+            stream.getTracks().forEach(t => t.stop());
+            cvs.toBlob(blob => {
+              if (blob) {
+                const url = URL.createObjectURL(blob);
+                setScreenshotUrl(url);
+                setScreenshotFilename(filename);
+                setModalTitle('Screenshot Result');
+                setModalOpen(true);
+              }
+            }, 'image/png');
+          });
+        })
+        .catch(() => {
+          // User canceled screenshot prompt
+        });
+    } else {
+      setScreenshotUrl(undefined);
+      setScreenshotFilename(undefined);
+      setModalTitle('Screenshot Result');
+      setModalOpen(true);
+    }
+  };
+
+  const handleToggleLogging = () => {
+    if (logging && logData.length > 0) {
+      setScreenshotUrl(undefined);
+      setScreenshotFilename(undefined);
+      setModalTitle('Automatic Data Log');
+      setModalOpen(true);
+    }
+    toggleLogging();
+  };
 
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      <Header timeString={timeString} dateString={dateString} />
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+      <div id="main-content">
+        <div className="row">
+          <CameraPanel
+            id={1}
+            title="CAMERA 01 — FRONT VIEW"
+            poolClass="pool-1"
+            overlayLabel="KOLAM 1 — LIVE"
+            timestamp={camTimestamp}
+            cameraState={cams[1]}
+            onTogglePlay={toggleCameraPlay}
+            onSeek={seekCamera}
+          />
+          <CameraPanel
+            id={2}
+            title="CAMERA 02 — BOTTOM / SIDE VIEW"
+            poolClass="pool-2"
+            overlayLabel="KOLAM 2 — LIVE"
+            timestamp={camTimestamp}
+            cameraState={cams[2]}
+            onTogglePlay={toggleCameraPlay}
+            onSeek={seekCamera}
+          />
+          <QrPanel
+            side={qrSide}
+            scanCount={qrScanCount}
+            confidence={qrConf}
+          />
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
+        <div className="row">
+          <AltitudePanel
+            altitude={altitude}
+            altPrev={altPrev}
+          />
+          <TrajectoryPanel
+            rovPos={rovPos}
+            recordedPath={recordedPath}
+            trajPath={trajPath}
+            imuYaw={imu.yaw}
+            isReplaying={isReplaying}
+            onReplay={replayTrajectory}
+            onClear={clearPath}
+            theme={theme}
+          />
+          <RovSchematic
+            imu={imu}
+          />
+        </div>
+      </div>
+
+      <FooterBar
+        mode={mode}
+        emergencyActive={emergencyActive}
+        connected={connected}
+        logging={logging}
+        hasLogData={logData.length > 0}
+        theme={theme}
+        depth={altitude}
+        onToggleMode={toggleMode}
+        onToggleEmergency={toggleEmergency}
+        onToggleLogging={handleToggleLogging}
+        onToggleTheme={toggleTheme}
+        onScreenshot={handleScreenshot}
+        onDownloadCSV={handleDownloadCSV}
+      />
+
+      <ResultModal
+        isOpen={modalOpen}
+        title={modalTitle}
+        logData={logData}
+        screenshotUrl={screenshotUrl}
+        screenshotFilename={screenshotFilename}
+        onClose={() => setModalOpen(false)}
+      />
     </>
-  )
+  );
 }
 
-export default App
+export default App;

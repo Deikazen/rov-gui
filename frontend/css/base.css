@@ -1,0 +1,52 @@
+/* ── BASE & GLOBAL STYLES ── */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text-main);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    gap: 12px;
+    transition: background 0.25s ease, color 0.25s ease;
+}
+
+@media (max-height: 800px) {
+    body {
+        overflow-y: auto;
+        height: auto;
+        min-height: 100vh;
+    }
+
+    #main-content {
+        height: 750px;
+    }
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+@keyframes emergencyPulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.15); }
+    50% { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0.28); }
+}
+
+@keyframes panelExpand {
+    from {
+        opacity: 0.72;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}

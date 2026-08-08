@@ -1,0 +1,72 @@
+/* ── QR DETECTOR PANEL STYLES ── */
+.qr-panel .panel-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    gap: 12px;
+}
+
+.qr-side-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 36px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.qr-valid-badge {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.qr-valid-badge.valid {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid var(--green);
+    color: var(--green);
+}
+
+.qr-valid-badge.invalid {
+    background: rgba(244, 63, 94, 0.1);
+    border: 1px solid var(--red);
+    color: var(--red);
+}
+
+.qr-anim-box {
+    width: 50px;
+    height: 50px;
+    border: 1px solid var(--border);
+    position: relative;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.qr-inner-grid {
+    position: absolute;
+    inset: 4px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 2px;
+    opacity: 0.4;
+}
+
+.qr-cell {
+    background: var(--blue);
+    border-radius: 1px;
+}
+
+.qr-info-row {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.qr-info-row span {
+    color: var(--text-main);
+    font-family: 'JetBrains Mono', monospace;
+}
