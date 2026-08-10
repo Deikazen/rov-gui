@@ -20,6 +20,7 @@ import math
 import threading
 from flask import Flask, jsonify, request, send_file
 from pymavlink import mavutil
+from flask_cors import CORS
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -32,6 +33,7 @@ RECV_TIMEOUT_S = 2.0
 RECONNECT_DELAY_S = 3.0
 
 app = Flask(__name__)
+CORS(app)
 
 # ---------------------------------------------------------------------------
 # Shared state (protected by lock)
