@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 3D Model
+frontend/public/models/TURTARA2.stl
+frontend/public/models/TURTARA.stl*.stl
+*.STL

@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
-import { useSimulation } from './hooks/useSimulation';
-import { Header } from './components/Header';
-import { CameraPanel } from './components/CameraPanel';
-import { QrPanel } from './components/QrPanel';
-import { AltitudePanel } from './components/AltitudePanel';
-import { TrajectoryPanel } from './components/TrajectoryPanel';
-import { RovSchematic } from './components/RovSchematic';
-import { FooterBar } from './components/FooterBar';
-import { ResultModal } from './components/ResultModal';
+import { useState, useEffect } from "react";
+import { useSimulation } from "./hooks/useSimulation";
+import { Header } from "./components/Header";
+import { CameraPanel } from "./components/CameraPanel";
+import { QrPanel } from "./components/QrPanel";
+import { AltitudePanel } from "./components/AltitudePanel";
+import { TrajectoryPanel } from "./components/TrajectoryPanel";
+// import { RovSchematic } from './components/RovSchematic';
+import { RovStlSchematic } from "./components/RovStlSchematic";
+import { FooterBar } from "./components/FooterBar";
+import { ResultModal } from "./components/ResultModal";
 
 export function App() {
   const {
@@ -38,63 +39,72 @@ export function App() {
     toggleTheme,
     toggleLogging,
     replayTrajectory,
-    clearPath
+    clearPath,
   } = useSimulation();
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalTitle, setModalTitle] = useState('RESULT');
+  const [modalTitle, setModalTitle] = useState("RESULT");
   const [screenshotUrl, setScreenshotUrl] = useState<string | undefined>();
-  const [screenshotFilename, setScreenshotFilename] = useState<string | undefined>();
+  const [screenshotFilename, setScreenshotFilename] = useState<
+    string | undefined
+  >();
 
   // Full view panel controller init
   useEffect(() => {
-    document.body.classList.toggle('light-theme', theme === 'light');
-    document.body.classList.toggle('emergency-active', emergencyActive);
+    document.body.classList.toggle("light-theme", theme === "light");
+    document.body.classList.toggle("emergency-active", emergencyActive);
   }, [theme, emergencyActive]);
 
   const handleDownloadCSV = () => {
     if (logData.length === 0) return;
-    const headers = "timestamp,altitude_m,pos_x_m,pos_y_m,imu_roll_deg,imu_pitch_deg,imu_yaw_deg,qr_side,connected\n";
-    const rows = logData.map(r => `${r.timestamp},${r.altitude},${r.posX},${r.posY},${r.roll},${r.pitch},${r.yaw},${r.qrSide},${r.connected}`).join("\n");
-    const blob = new Blob([headers + rows], { type: 'text/csv' });
+    const headers =
+      "timestamp,altitude_m,pos_x_m,pos_y_m,imu_roll_deg,imu_pitch_deg,imu_yaw_deg,qr_side,connected\n";
+    const rows = logData
+      .map(
+        (r) =>
+          `${r.timestamp},${r.altitude},${r.posX},${r.posY},${r.roll},${r.pitch},${r.yaw},${r.qrSide},${r.connected}`,
+      )
+      .join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `rov_telemetry_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.download = `rov_telemetry_${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 
     setScreenshotUrl(undefined);
     setScreenshotFilename(undefined);
-    setModalTitle('Automatic Data Log');
+    setModalTitle("Automatic Data Log");
     setModalOpen(true);
   };
 
   const handleScreenshot = () => {
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const filename = `rov_gcs_${ts}.png`;
 
     if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-      navigator.mediaDevices.getDisplayMedia({ video: true })
-        .then(stream => {
-          const video = document.createElement('video');
+      navigator.mediaDevices
+        .getDisplayMedia({ video: true })
+        .then((stream) => {
+          const video = document.createElement("video");
           video.srcObject = stream;
           video.play().then(() => {
-            const cvs = document.createElement('canvas');
+            const cvs = document.createElement("canvas");
             cvs.width = video.videoWidth;
             cvs.height = video.videoHeight;
-            cvs.getContext('2d')?.drawImage(video, 0, 0);
-            stream.getTracks().forEach(t => t.stop());
-            cvs.toBlob(blob => {
+            cvs.getContext("2d")?.drawImage(video, 0, 0);
+            stream.getTracks().forEach((t) => t.stop());
+            cvs.toBlob((blob) => {
               if (blob) {
                 const url = URL.createObjectURL(blob);
                 setScreenshotUrl(url);
                 setScreenshotFilename(filename);
-                setModalTitle('Screenshot Result');
+                setModalTitle("Screenshot Result");
                 setModalOpen(true);
               }
-            }, 'image/png');
+            }, "image/png");
           });
         })
         .catch(() => {
@@ -103,7 +113,7 @@ export function App() {
     } else {
       setScreenshotUrl(undefined);
       setScreenshotFilename(undefined);
-      setModalTitle('Screenshot Result');
+      setModalTitle("Screenshot Result");
       setModalOpen(true);
     }
   };
@@ -112,7 +122,7 @@ export function App() {
     if (logging && logData.length > 0) {
       setScreenshotUrl(undefined);
       setScreenshotFilename(undefined);
-      setModalTitle('Automatic Data Log');
+      setModalTitle("Automatic Data Log");
       setModalOpen(true);
     }
     toggleLogging();
@@ -144,18 +154,11 @@ export function App() {
             onTogglePlay={toggleCameraPlay}
             onSeek={seekCamera}
           />
-          <QrPanel
-            side={qrSide}
-            scanCount={qrScanCount}
-            confidence={qrConf}
-          />
+          <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} />
         </div>
 
         <div className="row">
-          <AltitudePanel
-            altitude={altitude}
-            altPrev={altPrev}
-          />
+          <AltitudePanel altitude={altitude} altPrev={altPrev} />
           <TrajectoryPanel
             rovPos={rovPos}
             recordedPath={recordedPath}
@@ -166,9 +169,7 @@ export function App() {
             onClear={clearPath}
             theme={theme}
           />
-          <RovSchematic
-            imu={imu}
-          />
+          <RovStlSchematic imu={imu} />
         </div>
       </div>
 

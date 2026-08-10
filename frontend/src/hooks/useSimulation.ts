@@ -55,6 +55,7 @@ export function useSimulation() {
     const nextConnFlickerRef = useRef(30000);
     const alarmActiveRef = useRef(false);
     const audioCtxRef = useRef<AudioContext | null>(null);
+    const isWsConnectedRef = useRef(false);
 
     // Audio Alert function
     const playBeep = useCallback(() => {
@@ -101,6 +102,71 @@ export function useSimulation() {
         return () => clearInterval(interval);
     }, []);
 
+    // Realtime Telemetry WebSocket connection to backend (model_3d.py)
+    useEffect(() => {
+        let ws: WebSocket | null = null;
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+        let isComponentMounted = true;
+
+        const connectWS = () => {
+            try {
+                ws = new WebSocket('ws://localhost:8082');
+
+                ws.onopen = () => {
+                    if (!isComponentMounted) return;
+                    console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://localhost:8082)');
+                    isWsConnectedRef.current = true;
+                    setConnected(true);
+                };
+
+                ws.onmessage = (event) => {
+                    if (!isComponentMounted) return;
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'telemetry') {
+                            setImu({
+                                roll: Number(data.roll) || 0,
+                                pitch: Number(data.pitch) || 0,
+                                yaw: Number(data.yaw) || 0,
+                            });
+                        } else if (data.type === 'status') {
+                            setConnected(Boolean(data.mavlink_online));
+                        }
+                    } catch (err) {
+                        console.error('[WS TELEMETRY] Error parsing message:', err);
+                    }
+                };
+
+                ws.onclose = () => {
+                    if (!isComponentMounted) return;
+                    isWsConnectedRef.current = false;
+                    reconnectTimer = setTimeout(connectWS, 3000);
+                };
+
+                ws.onerror = () => {
+                    if (!isComponentMounted) return;
+                    isWsConnectedRef.current = false;
+                    ws?.close();
+                };
+            } catch {
+                if (isComponentMounted) {
+                    reconnectTimer = setTimeout(connectWS, 3000);
+                }
+            }
+        };
+
+        connectWS();
+
+        return () => {
+            isComponentMounted = false;
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            if (ws) {
+                ws.onclose = null;
+                ws.close();
+            }
+        };
+    }, []);
+
     // RequestAnimationFrame simulation loop
     useEffect(() => {
         let animId: number;
@@ -136,13 +202,15 @@ export function useSimulation() {
                 setQrScanCount(prev => prev + 1);
             }
 
-            // 3. Connection flicker simulation
-            connTimerRef.current += dt;
-            if (connTimerRef.current >= nextConnFlickerRef.current) {
-                connTimerRef.current = 0;
-                nextConnFlickerRef.current = 28000 + Math.random() * 4000;
-                setConnected(false);
-                setTimeout(() => setConnected(true), 2000);
+            // 3. Connection flicker simulation (only if WS is not actively managing connection)
+            if (!isWsConnectedRef.current) {
+                connTimerRef.current += dt;
+                if (connTimerRef.current >= nextConnFlickerRef.current) {
+                    connTimerRef.current = 0;
+                    nextConnFlickerRef.current = 28000 + Math.random() * 4000;
+                    setConnected(false);
+                    setTimeout(() => setConnected(true), 2000);
+                }
             }
 
             // 4. ROV Position calculation
@@ -166,16 +234,18 @@ export function useSimulation() {
                 });
             }
 
-            // 5. IMU calculation
-            const yawTarget = (Math.sin(simTimeRef.current / 4000) * 45 + 180) % 360;
-            const rollTarget = Math.sin(simTimeRef.current / 1500) * 4;
-            const pitchTarget = Math.cos(simTimeRef.current / 1700) * 3;
+            // 5. IMU calculation (Only fallback to simulation if WebSocket backend is offline)
+            if (!isWsConnectedRef.current) {
+                const yawTarget = (Math.sin(simTimeRef.current / 4000) * 45 + 180) % 360;
+                const rollTarget = Math.sin(simTimeRef.current / 1500) * 4;
+                const pitchTarget = Math.cos(simTimeRef.current / 1700) * 3;
 
-            setImu(prev => ({
-                roll: prev.roll + (rollTarget - prev.roll) * 0.05,
-                pitch: prev.pitch + (pitchTarget - prev.pitch) * 0.05,
-                yaw: (prev.yaw + ((yawTarget - prev.yaw + 540) % 360 - 180) * 0.02 + 360) % 360
-            }));
+                setImu(prev => ({
+                    roll: prev.roll + (rollTarget - prev.roll) * 0.05,
+                    pitch: prev.pitch + (pitchTarget - prev.pitch) * 0.05,
+                    yaw: (prev.yaw + ((yawTarget - prev.yaw + 540) % 360 - 180) * 0.02 + 360) % 360
+                }));
+            }
 
             // 6. Camera replays
             setCams(prev => ({
