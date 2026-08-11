@@ -75,53 +75,60 @@ def mavlink_worker():
 
             print(
                 f"[MAVLink] Heartbeat received. System ID: {master.target_system}")
-            with state_lock:
-                real_data['mavlink_connected'] = True
 
-            # Request data streams
+            # Request semua data stream dari ArduSub (ALL STREAMS @ 10Hz)
             master.mav.request_data_stream_send(
                 master.target_system,
                 master.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+                mavutil.mavlink.MAV_DATA_STREAM_ALL,
                 10, 1
             )
-            master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
-                10, 1
-            )
+
+            last_msg_time = time.time()
 
             # Main receive loop
             while True:
-                msg = master.recv_match(
-                    type=['GLOBAL_POSITION_INT', 'VFR_HUD'],
-                    blocking=True,
-                    timeout=RECV_TIMEOUT_S
-                )
-                if not msg:
-                    print(
-                        "[MAVLink] Timeout waiting for data, checking connection...")
+                # Tangkap SEMUA pesan MAVLink tanpa membatasi tipe di recv_match
+                msg = master.recv_match(blocking=True, timeout=1.0)
+
+                if msg:
+                    msg_type = msg.get_type()
+
+                    # Heartbeat menandakan koneksi MAVLink aktif
+                    if msg_type == 'HEARTBEAT':
+                        last_msg_time = time.time()
+                        with state_lock:
+                            real_data['mavlink_connected'] = True
+
+                    # 1. Coba dari GLOBAL_POSITION_INT (relative_alt dalam mm)
+                    elif msg_type == 'GLOBAL_POSITION_INT':
+                        depth_m = max(0.0, -(msg.relative_alt / 1000.0))
+                        with state_lock:
+                            real_data['depth'] = depth_m
+
+                    # 2. Coba dari VFR_HUD (climb rate & alt)
+                    elif msg_type == 'VFR_HUD':
+                        rate_ms = -float(msg.climb)
+                        with state_lock:
+                            real_data['rate'] = rate_ms
+                            # Jika relative_alt tidak ada, gunakan alt dari VFR_HUD
+                            if real_data['depth'] == 0.0 and msg.alt < 0:
+                                real_data['depth'] = abs(float(msg.alt))
+
+                    # 3. Alternative: SCALED_PRESSURE (Sensor Bar30 bawaan BlueROV2)
+                    elif msg_type == 'SCALED_PRESSURE':
+                        # Konversi HPa ke Kedalaman Meter (p_barom / 98.0665)
+                        press_diff = max(0.0, msg.press_diff)  # hPa
+                        depth_m = press_diff / 98.0665
+                        with state_lock:
+                            real_data['depth'] = depth_m
+
+                # Toleransi disconnect jika tidak ada pesan apa pun selama 5 detik
+                if time.time() - last_msg_time > 5.0:
+                    print("[MAVLink] Connection lost (timeout > 5s)...")
                     with state_lock:
                         real_data['mavlink_connected'] = False
-                    break  # break inner loop -> reconnect
-
-                with state_lock:
-                    real_data['mavlink_connected'] = True
-
-                msg_type = msg.get_type()
-                if msg_type == 'GLOBAL_POSITION_INT':
-                    # relative_alt is mm, negative underwater -> flip & convert to meters
-                    depth_m = max(0.0, -(msg.relative_alt / 1000.0))
-                    with state_lock:
-                        real_data['depth'] = depth_m
-
-                elif msg_type == 'VFR_HUD':
-                    # climb: negative = diving, positive = surfacing
-                    # rate positive = descending (matches frontend icon logic)
-                    rate_ms = -float(msg.climb)
-                    with state_lock:
-                        real_data['rate'] = rate_ms
+                    break
 
         except Exception as e:
             print(f"[MAVLink] Error: {e}")
@@ -129,16 +136,17 @@ def mavlink_worker():
                 real_data['mavlink_connected'] = False
             time.sleep(RECONNECT_DELAY_S)
         finally:
-            try:
-                if master is not None:
+            if master is not None:
+                try:
                     master.close()
-            except Exception:
-                pass
-
+                except Exception:
+                    pass
 
 # ---------------------------------------------------------------------------
 # Dummy data background thread (smooth sine oscillation for UI testing)
 # ---------------------------------------------------------------------------
+
+
 def dummy_worker():
     speed = 0.4  # rad/s, controls oscillation speed
     t0 = time.time()
