@@ -19,6 +19,8 @@ state_lock = threading.Lock()
 data = {
     'x': 0.0,
     'y': 0.0,
+    'z': 0.0,
+    'yaw': 0.0,
     'mavlink_connected': False,
 }
 
@@ -44,19 +46,32 @@ def mavlink_worker():
                 f"[MAVLINK] Heartbeat received. System ID: {master.target_system}"
             )
 
-            # Request semua data dari Ardusub 10Hz
+            # Request semua data stream posisi dan attitute 10Hz
             master.mav.request_data_stream_send(
                 master.target_system,
                 master.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_ALL,
-                10, 1
+                mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+                10,
+                1,
+            )
+
+            master.mav.request_data_stream_send(
+                master.target_system,
+                master.target_component,
+                mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,  # untuk attitude/yaw
+                10,
+                1,
             )
 
             last_msg_time = time.time()
 
             # Looping menerima data
             while True:
-                msg = master.recv_match(blocking=True, timeout=1.0)
+                msg = master.recv_match(
+                    type=['HEARTBEAT', 'LOCAL_POSITION_NED, ATTITUDE'],
+                    blocking=True,
+                    timeout=1.0
+                )
 
                 if msg:
                     msg_type = msg.get_type()
@@ -67,11 +82,14 @@ def mavlink_worker():
                             data['mavlink_connected'] = True
 
                     elif msg_type == 'GLOBAL_POSITION_INT':
-                        x_m = max(0.0, - (msg.relative_alt / 1000.0))
-                        y_m = max(0.0, - (msg.relative_alt / 1000.0))
                         with state_lock:
-                            data['x'] = x_m,
-                            data['y'] = y_m
+                            data['x'] = float(msg.x)
+                            data['y'] = float(msg.y)
+                            data['z'] = float(msg.z)
+
+                    elif msg_type == 'ATTITUDE':
+                        with state_lock:
+                            data['yaw'] = float(msg.yaw * (180.0 / 3.14159265))
 
                 # jika tidak dapat pesan apapun dalam 5 detik
                 if time.time() - last_msg_time > 5.0:
@@ -96,17 +114,13 @@ def mavlink_worker():
 # Routes
 @app.route('/api/trajectory', methods=['GET'])
 def get_telemetry():
-
-    x = data['x'],
-    y = data['y'],
-    mavlink_connected = data['mavlink_connected']
-
-    return jsonify({
-        'x': x,
-        'y': y,
-        'mavlink_connected': mavlink_connected
-
-    })
+    with state_lock:
+        return jsonify({
+            'x': round(data['x'], 2),
+            'y': round(data['y'], 2),
+            'yaw': round(data['yaw'], 1),
+            'mavlink_connected': data['mavlink_connected'],
+        })
 
 
 # Entrypoint
