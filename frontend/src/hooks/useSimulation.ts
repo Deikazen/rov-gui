@@ -48,7 +48,7 @@ export function useSimulation() {
     // Refs for simulation calculation
     const simTimeRef = useRef(0);
     const pathProgressRef = useRef(0);
-    const lastTimeRef = useRef(performance.now());
+    const lastTimeRef = useRef(0);
     const logTimerRef = useRef(0);
     const qrTimerRef = useRef(0);
     const connTimerRef = useRef(0);

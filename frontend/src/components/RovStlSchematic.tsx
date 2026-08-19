@@ -24,7 +24,7 @@ function StlModel({ imu }: { imu: ImuData }) {
       const yawRad = ((imu.yaw - 90) * Math.PI) / 180;
       groupRef.current.rotation.set(pitchRad, yawRad, -rollRad, "YXZ");
     }
-  }, [imu.roll, imu.pitch, imu.yaw]);
+  }, [imu]);
 
   // Load file STL dari folder public (/models/TURTARA2.stl)
   const geometry = useLoader(STLLoader, "/models/TURTARA2.stl");

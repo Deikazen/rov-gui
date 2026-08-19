@@ -9,7 +9,12 @@ interface TelemetryData {
   mavlink_connected: boolean;
 }
 
-export const AltitudePanel: React.FC = () => {
+interface AltitudePanelProps {
+  altitude?: number;
+  altPrev?: number;
+}
+
+export const AltitudePanel: React.FC<AltitudePanelProps> = () => {
   const [telemetry, setTelemetry] = useState<TelemetryData>({
     source: "dummy",
     depth: 0,
