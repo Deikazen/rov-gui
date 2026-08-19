@@ -1,0 +1,24 @@
+/* ── DESIGN TOKENS & COLOR PALETTES ── */
+:root {
+    --bg: #090b11;
+    --panel: #111420;
+    --border: #1e2538;
+    --blue: #00aaff;
+    --green: #10b981;
+    --amber: #f59e0b;
+    --red: #f43f5e;
+    --text-main: #f8fafc;
+    --text-muted: #64748b;
+}
+
+body.light-theme {
+    --bg: #eef3f8;
+    --panel: #ffffff;
+    --border: #ccd6e3;
+    --blue: #0077b6;
+    --green: #0f8a5f;
+    --amber: #b77900;
+    --red: #d92d48;
+    --text-main: #111827;
+    --text-muted: #5b6678;
+}

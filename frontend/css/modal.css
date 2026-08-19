@@ -1,0 +1,115 @@
+/* ── RESULT MODAL & POPUP DIALOG STYLES ── */
+.result-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(3, 5, 10, 0.72);
+    backdrop-filter: blur(3px);
+}
+
+.result-modal.open {
+    display: flex;
+}
+
+.result-dialog {
+    width: min(760px, 94vw);
+    max-height: min(720px, 88vh);
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.result-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--blue);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.result-close {
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.result-body {
+    padding: 14px;
+    overflow: auto;
+}
+
+.result-preview-img {
+    width: 100%;
+    max-height: 430px;
+    object-fit: contain;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.result-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.result-stat {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.result-stat label {
+    display: block;
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.result-stat span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-main);
+}
+
+.result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+}
+
+.result-table th,
+.result-table td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.result-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+}

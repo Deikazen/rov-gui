@@ -1,0 +1,114 @@
+/* ── DASHBOARD GRID & PANEL STYLES ── */
+#main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease, background 0.25s ease;
+    transform-origin: center;
+}
+
+.panel.full-view {
+    position: fixed;
+    inset: 16px;
+    z-index: 1000;
+    transform: scale(1);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    border-color: rgba(0, 170, 255, 0.55);
+    animation: panelExpand 0.28s ease;
+}
+
+body.full-view-active .panel:not(.full-view) {
+    pointer-events: none;
+}
+
+body.full-view-active::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(3, 5, 10, 0.72);
+    backdrop-filter: blur(2px);
+}
+
+.panel-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.panel-header .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+}
+
+.panel-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.panel-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.panel-expand-btn {
+    width: 24px;
+    height: 24px;
+    display: inline-grid;
+    place-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.panel-expand-btn:hover {
+    color: var(--blue);
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
