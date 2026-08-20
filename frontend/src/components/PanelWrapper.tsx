@@ -21,11 +21,19 @@ export const PanelWrapper: React.FC<PanelWrapperProps> = ({
         setIsFullView(prev => !prev);
     };
 
+    // Listen to Global Reset Layout Event
+    useEffect(() => {
+        const handleGlobalReset = () => {
+            setIsFullView(false);
+        };
+        window.addEventListener('rov-reset-layout', handleGlobalReset);
+        return () => window.removeEventListener('rov-reset-layout', handleGlobalReset);
+    }, []);
+
     useEffect(() => {
         if (isFullView) {
             document.body.classList.add('full-view-active');
         } else {
-            // Check if any other panel is full view before removing
             const anyFull = document.querySelector('.panel.full-view');
             if (!anyFull) {
                 document.body.classList.remove('full-view-active');
@@ -55,7 +63,7 @@ export const PanelWrapper: React.FC<PanelWrapperProps> = ({
             <div className="panel-header">
                 <span className="panel-title">{title}</span>
                 <span className="panel-actions">
-                    <div className="dot"></div>
+                    <div className="dot" />
                     <button
                         type="button"
                         className="panel-expand-btn"

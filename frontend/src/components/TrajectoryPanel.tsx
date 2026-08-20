@@ -159,25 +159,35 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
         showToast('🗑 Jejak Trajectory Dibersihkan');
     };
 
-    // 6. Penanganan Resize Canvas
+    // 6. Penanganan Resize Canvas (Fix canvas feedback loop)
     const resizeCanvas = useCallback(() => {
         const cvs = canvasRef.current;
         if (!cvs || !cvs.parentElement) return;
         const rect = cvs.parentElement.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        cvs.width = rect.width * dpr;
-        cvs.height = rect.height * dpr;
-        cvs.style.width = `${rect.width}px`;
-        cvs.style.height = `${rect.height}px`;
+        const w = Math.floor(rect.width);
+        const h = Math.floor(rect.height);
+        if (w > 0 && h > 0) {
+            cvs.width = w * dpr;
+            cvs.height = h * dpr;
+        }
     }, []);
 
     useEffect(() => {
         resizeCanvas();
+        const handleGlobalReset = () => {
+            setZoomScale(45);
+            setPanOffset({ x: 0, y: 0 });
+            setAutoCenter(true);
+            resizeCanvas();
+        };
         window.addEventListener('resize', resizeCanvas);
         window.addEventListener('rov-layout-change', resizeCanvas);
+        window.addEventListener('rov-reset-layout', handleGlobalReset);
         return () => {
             window.removeEventListener('resize', resizeCanvas);
             window.removeEventListener('rov-layout-change', resizeCanvas);
+            window.removeEventListener('rov-reset-layout', handleGlobalReset);
         };
     }, [resizeCanvas]);
 

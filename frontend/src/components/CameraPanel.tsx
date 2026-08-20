@@ -44,6 +44,17 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({
   const hasStreamConfig = Boolean(streamUrl && streamUrl.trim().length > 0);
   const isLive = hasStreamConfig && !feedError;
 
+  // Listen to Global Reset Layout Event
+  React.useEffect(() => {
+    const handleGlobalReset = () => {
+      setZoom(1.0);
+      setPan({ x: 0, y: 0 });
+      setIsContainFit(false);
+    };
+    window.addEventListener("rov-reset-layout", handleGlobalReset);
+    return () => window.removeEventListener("rov-reset-layout", handleGlobalReset);
+  }, []);
+
   const handleRetryFeed = () => {
     setFeedError(false);
   };

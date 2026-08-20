@@ -8,6 +8,7 @@ interface FooterBarProps {
     hasLogData: boolean;
     theme: 'dark' | 'light';
     depth: number;
+    onResetLayout?: () => void;
     onToggleMode: () => void;
     onToggleEmergency: () => void;
     onToggleLogging: () => void;
@@ -24,6 +25,7 @@ export const FooterBar: React.FC<FooterBarProps> = ({
     hasLogData,
     theme,
     depth,
+    onResetLayout,
     onToggleMode,
     onToggleEmergency,
     onToggleLogging,
@@ -109,6 +111,13 @@ export const FooterBar: React.FC<FooterBarProps> = ({
             <div className="footer-divider" />
 
             <div className="footer-item" style={{ marginLeft: 'auto' }}>
+                <button
+                    className="action-btn"
+                    onClick={onResetLayout}
+                    title="Reset semua ukuran card tampilan dan zoom kamera ke setelan awal"
+                >
+                    ↺ Reset Layout
+                </button>
                 <button className="action-btn theme-toggle" id="btn-theme" onClick={onToggleTheme}>
                     {theme === 'light' ? 'Dark' : 'Light'}
                 </button>

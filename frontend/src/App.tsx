@@ -132,9 +132,18 @@ export function App() {
     toggleLogging();
   };
 
+  const handleResetLayout = () => {
+    window.dispatchEvent(new Event("rov-reset-layout"));
+    window.dispatchEvent(new Event("rov-layout-change"));
+  };
+
   return (
     <>
-      <Header timeString={timeString} dateString={dateString} />
+      <Header
+        timeString={timeString}
+        dateString={dateString}
+        onResetLayout={handleResetLayout}
+      />
 
       <div id="main-content">
         <div className="row">
@@ -187,6 +196,7 @@ export function App() {
         hasLogData={logData.length > 0}
         theme={theme}
         depth={altitude}
+        onResetLayout={handleResetLayout}
         onToggleMode={toggleMode}
         onToggleEmergency={toggleEmergency}
         onToggleLogging={handleToggleLogging}
