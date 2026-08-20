@@ -79,7 +79,7 @@ export const RovStlSchematic: React.FC<RovStlSchematicProps> = ({ imu }) => {
     <PanelWrapper className="rov-panel" title="ROV SCHEMATIC — 3D CAD STL VIEW">
       <div
         id="rov-3d"
-        style={{ position: "relative", width: "100%", height: "280px" }}
+        style={{ position: "relative", width: "100%", height: "100%", minHeight: "180px" }}
       >
         <Canvas camera={{ position: [0, 8, 15], fov: 45 }}>
           <ambientLight intensity={0.8} />
