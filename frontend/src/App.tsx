@@ -10,13 +10,10 @@ import { RovStlSchematic } from "./components/RovStlSchematic";
 import { FooterBar } from "./components/FooterBar";
 import { ResultModal } from "./components/ResultModal";
 
-<<<<<<< HEAD
-=======
 // Ambil dari .env: VITE_CAM1_URL, VITE_CAM2_URL (lihat frontend/.env.example)
 const CAM1_URL = import.meta.env.VITE_CAM1_URL as string | undefined;
 const CAM2_URL = import.meta.env.VITE_CAM2_URL as string | undefined;
 
->>>>>>> origin/kriii
 export function App() {
   const {
     timeString,
@@ -150,10 +147,7 @@ export function App() {
             cameraState={cams[1]}
             onTogglePlay={toggleCameraPlay}
             onSeek={seekCamera}
-<<<<<<< HEAD
-=======
             streamUrl={CAM1_URL}
->>>>>>> origin/kriii
           />
           <CameraPanel
             id={2}
@@ -164,10 +158,7 @@ export function App() {
             cameraState={cams[2]}
             onTogglePlay={toggleCameraPlay}
             onSeek={seekCamera}
-<<<<<<< HEAD
-=======
             streamUrl={CAM2_URL}
->>>>>>> origin/kriii
           />
           <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} />
         </div>

@@ -25,7 +25,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- KONFIGURASI: sesuaikan dengan IP ZeroTier Jetson Anda ---
-JETSON_CAM1_URL = "http://10.147.48.168:9010/video_feed"
+JETSON_CAM1_URL = "http://10.37.36.168:9010/video_feed"
 # JETSON_CAM2_URL = "http://<ip-jetson-kedua-jika-ada>:9010/video_feed"
 
 app = FastAPI(title="ROV Camera Proxy")
@@ -41,7 +41,8 @@ app.add_middleware(
 
 async def relay_mjpeg(source_url: str):
     """Generator yang streaming byte demi byte dari Jetson ke client, tanpa buffering penuh di memori."""
-    timeout = httpx.Timeout(10.0, read=None)  # read=None -> stream tanpa batas waktu
+    timeout = httpx.Timeout(
+        10.0, read=None)  # read=None -> stream tanpa batas waktu
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             async with client.stream("GET", source_url) as upstream:
