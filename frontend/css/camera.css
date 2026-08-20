@@ -23,6 +23,28 @@ body.light-theme .cam-panel .panel-body {
     justify-content: center;
 }
 
+.cam-feed-wrap.is-zoomed {
+    cursor: grab;
+}
+
+.cam-feed-wrap.is-dragging {
+    cursor: grabbing !important;
+    user-select: none;
+}
+
+/* Transformable Media Layer (Zoom & Pan) */
+.cam-feed-media {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform;
+}
+
 /* Live Video MJPEG Stream */
 .cam-feed-live {
     position: absolute;
@@ -200,6 +222,94 @@ body.light-theme .cam-timestamp {
     align-items: center;
     gap: 6px;
     pointer-events: auto;
+}
+
+/* Zoom Toolbar Controls */
+.cam-zoom-controls {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(3, 7, 18, 0.75);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(0, 170, 255, 0.3);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+body.light-theme .cam-zoom-controls {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
+}
+
+.cam-zoom-btn {
+    width: 18px;
+    height: 18px;
+    background: transparent;
+    border: none;
+    color: var(--blue);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cam-zoom-btn:hover:not(:disabled) {
+    background: rgba(0, 170, 255, 0.25);
+    color: #ffffff;
+}
+
+.cam-zoom-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.cam-zoom-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--blue);
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid rgba(0, 170, 255, 0.2);
+    border-right: 1px solid rgba(0, 170, 255, 0.2);
+    cursor: pointer;
+    line-height: 18px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cam-zoom-badge:hover,
+.cam-zoom-badge.active {
+    background: rgba(0, 170, 255, 0.25);
+    color: #38bdf8;
+}
+
+.cam-zoom-reset-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--amber);
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    backdrop-filter: blur(4px);
+}
+
+.cam-zoom-reset-btn:hover {
+    background: rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+body.light-theme .cam-zoom-reset-btn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.5);
 }
 
 .cam-fit-toggle-btn {
