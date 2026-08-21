@@ -1,25 +1,25 @@
-from pymavlink import mavutil
+import time
 import math
+import threading
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import threading
-import time
+from pymavlink import mavutil
 
 # ---------------------------------------------------------------------------
 # Konfigurasi Endpoint MAVLink & Server
 # ---------------------------------------------------------------------------
-# Endpoint UDP untuk menerima data telemetri MAVLink dari Pixhawk / Companion Computer
 MAVLINK_UDP_ENDPOINT = 'udpin:0.0.0.0:14553'
 HEARTBEAT_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 3.0
+HTTP_PORT = 8007
 
 app = Flask(__name__)
 CORS(app)
 
 state_lock = threading.Lock()
 
-# 'dummy' atau 'real' - default 'dummy' agar langsung dapat divisualisasikan saat pengujian
-current_source = 'dummy'
+# Sumber data default ('real' untuk data fisik sensor, 'dummy' untuk simulasi)
+current_source = 'real'
 
 # Data mentah dari sensor / MAVLink
 real_data = {
@@ -30,7 +30,7 @@ real_data = {
     'mavlink_connected': False,
 }
 
-# Data simulasi tiruan untuk pengujian tanpa perangkat fisik
+# Data simulasi tiruan untuk pengujian tanpa robot
 dummy_data = {
     'x': 0.0,
     'y': 0.0,
@@ -45,33 +45,52 @@ origin = {
     'z': 0.0,
 }
 
+
 # ---------------------------------------------------------------------------
 # MAVLink Background Worker Thread
 # ---------------------------------------------------------------------------
 def mavlink_worker():
-    """Menerima data telemetri posisi & orientasi dari Pixhawk via MAVLink."""
+    """Menerima data telemetri posisi & orientasi dari Pixhawk via BlueOS forwarding."""
     while True:
         master = None
         try:
-            print(f"[MAVLINK] Menghubungkan ke {MAVLINK_UDP_ENDPOINT} ...")
+            print(
+                f"[MAVLINK] Mendengarkan paket UDP di {MAVLINK_UDP_ENDPOINT} ...")
             master = mavutil.mavlink_connection(MAVLINK_UDP_ENDPOINT)
 
-            hb = master.wait_heartbeat(timeout=HEARTBEAT_TIMEOUT_S)
-            if not hb:
-                print("[MAVLINK] Tidak menerima heartbeat, mencoba menghubungkan ulang...")
-                with state_lock:
-                    real_data['mavlink_connected'] = False
-                time.sleep(RECONNECT_DELAY_S)
-                continue
+            # 1. Tangkap heartbeat resmi dari Autopilot (Abaikan router comp_id 0)
+            target_sys = 1
+            target_comp = 1
+            t_start = time.time()
 
-            print(
-                f"[MAVLINK] Heartbeat diterima. System ID: {master.target_system}, Component ID: {master.target_component}"
-            )
+            while True:
+                hb = master.recv_match(
+                    type='HEARTBEAT', blocking=True, timeout=1.0)
+                if hb is not None:
+                    src_sys = hb.get_srcSystem()
+                    src_comp = hb.get_srcComponent()
 
-            # Request data stream posisi (10 Hz)
+                    # Autopilot Pixhawk/ArduSub selalu memiliki Component ID == 1
+                    if src_comp == 1 and src_sys != 0:
+                        target_sys = src_sys
+                        target_comp = src_comp
+                        master.target_system = target_sys
+                        master.target_component = target_comp
+                        print(
+                            f"[MAVLINK] Autopilot terdeteksi -> Sys ID: {target_sys}, Comp ID: {target_comp}")
+                        break
+
+                if time.time() - t_start > HEARTBEAT_TIMEOUT_S:
+                    raise Exception(
+                        "Timeout menunggu heartbeat valid dari Pixhawk")
+
+            with state_lock:
+                real_data['mavlink_connected'] = True
+
+            # 2. Request data stream posisi (10 Hz)
             master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
+                target_sys,
+                target_comp,
                 mavutil.mavlink.MAV_DATA_STREAM_POSITION,
                 10,
                 1,
@@ -79,25 +98,16 @@ def mavlink_worker():
 
             # Request data stream attitude / orientasi (10 Hz)
             master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
+                target_sys,
+                target_comp,
                 mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
-                10,
-                1,
-            )
-
-            # Request seluruh stream umum
-            master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_ALL,
                 10,
                 1,
             )
 
             last_msg_time = time.time()
 
-            # Looping penerimaan paket MAVLink
+            # 3. Looping penerimaan paket MAVLink
             while True:
                 msg = master.recv_match(blocking=True, timeout=1.0)
 
@@ -108,21 +118,17 @@ def mavlink_worker():
                     with state_lock:
                         real_data['mavlink_connected'] = True
 
-                        if msg_type == 'HEARTBEAT':
-                            pass
-
-                        elif msg_type == 'LOCAL_POSITION_NED':
-                            # x = North (meter), y = East (meter), z = Down (meter)
+                        if msg_type == 'LOCAL_POSITION_NED':
                             real_data['x'] = float(msg.x)
                             real_data['y'] = float(msg.y)
                             real_data['z'] = float(msg.z)
 
                         elif msg_type == 'GLOBAL_POSITION_INT':
                             if hasattr(msg, 'relative_alt'):
-                                real_data['z'] = max(0.0, -float(msg.relative_alt) / 1000.0)
+                                real_data['z'] = max(
+                                    0.0, -float(msg.relative_alt) / 1000.0)
 
                         elif msg_type == 'ATTITUDE':
-                            # Konversi radian yaw ke derajat (0 - 360)
                             yaw_deg = (math.degrees(msg.yaw) + 360.0) % 360.0
                             real_data['yaw'] = yaw_deg
 
@@ -150,20 +156,18 @@ def mavlink_worker():
 # Dummy Simulation Worker Thread (20 Hz)
 # ---------------------------------------------------------------------------
 def dummy_worker():
-    """Menghasilkan pola trajectory halus untuk pengujian UI tanpa MAVLink."""
+    """Menghasilkan pola trajectory halus untuk pengujian UI tanpa perangkat fisik."""
     t0 = time.time()
     while True:
         t = time.time() - t0
-        speed = 0.22  # rad/detik
-        scale_x = 3.0  # rentang sumbu X (meter)
-        scale_y = 2.0  # rentang sumbu Y (meter)
+        speed = 0.22
+        scale_x = 3.0
+        scale_y = 2.0
 
-        # Pola kurva lemniscate / figure-8 di dalam kolam
         x = scale_x * math.sin(t * speed)
         y = scale_y * math.sin(t * speed * 2.0)
         z = 1.0 + 0.3 * math.sin(t * speed * 0.5)
 
-        # Hitung sudut heading (yaw) berdasarkan vektor pergerakan
         dx = scale_x * speed * math.cos(t * speed)
         dy = scale_y * speed * 2.0 * math.cos(t * speed * 2.0)
         yaw_rad = math.atan2(dy, dx)
@@ -183,7 +187,7 @@ def dummy_worker():
 # ---------------------------------------------------------------------------
 @app.route('/api/trajectory', methods=['GET'])
 def get_telemetry():
-    """Mengembalikan posisi relatif dari titik origin, data raw, origin offset, serta status koneksi."""
+    """Mengembalikan posisi relatif dari origin, data raw, offset origin, dan status koneksi."""
     with state_lock:
         source = current_source
         if source == 'real':
@@ -199,7 +203,6 @@ def get_telemetry():
             yaw = dummy_data['yaw']
             connected = real_data['mavlink_connected']
 
-        # Hitung koordinat relatif terhadap titik origin yang telah dikalibrasi
         rel_x = raw_x - origin['x']
         rel_y = raw_y - origin['y']
         rel_z = raw_z - origin['z']
@@ -223,7 +226,7 @@ def get_telemetry():
 @app.route('/api/origin/calibrate', methods=['POST'])
 @app.route('/api/calibrate', methods=['POST'])
 def calibrate_origin():
-    """Mengatur posisi saat ini sebagai titik (0, 0, 0) baru (Origin Calibration)."""
+    """Mengatur posisi saat ini sebagai titik (0, 0, 0) baru."""
     with state_lock:
         if current_source == 'real':
             origin['x'] = real_data['x']
@@ -262,7 +265,7 @@ def reset_origin():
 
 @app.route('/api/source', methods=['POST'])
 def set_source():
-    """Mengubah sumber data antara 'real' (MAVLink Pixhawk) atau 'dummy' (Simulasi)."""
+    """Mengubah sumber data antara 'real' atau 'dummy'."""
     global current_source
     payload = request.get_json(silent=True) or {}
     requested = payload.get('source')
@@ -285,5 +288,6 @@ if __name__ == '__main__':
     mav_thread.start()
     dummy_thread.start()
 
-    print("[ROV TRAJECTORY] Server Backend aktif pada http://0.0.0.0:8007")
-    app.run(host='0.0.0.0', port=8007, debug=False, threaded=True)
+    print(
+        f"[ROV TRAJECTORY] Server Backend aktif pada http://127.0.0.1:{HTTP_PORT}")
+    app.run(host='0.0.0.0', port=HTTP_PORT, debug=False, threaded=True)

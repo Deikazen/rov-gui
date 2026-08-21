@@ -56,20 +56,34 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
         }, 2800);
     }, []);
 
-    // 1. Fetch data dari Flask backend (http://localhost:8007/api/trajectory) setiap 50ms (20 Hz)
+    // 1. Fetch data dari Flask backend (http://localhost:8007/api/trajectory) setiap 100ms (10 Hz)
     useEffect(() => {
         let isMounted = true;
+        let isFetching = false;
+        let failureCount = 0;
 
         const fetchTrajectory = async () => {
+            // Cegah request overlap jika request sebelumnya belum selesai
+            if (isFetching) return;
+            isFetching = true;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 800);
+
             try {
-                const res = await fetch('http://localhost:8007/api/trajectory');
+                const res = await fetch('http://localhost:8007/api/trajectory', {
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+
                 if (!res.ok) {
-                    if (isMounted) setIsBackendConnected(false);
-                    return;
+                    throw new Error(`HTTP error! status: ${res.status}`);
                 }
+
                 const data: TrajectoryTelemetry = await res.json();
                 if (!isMounted) return;
 
+                failureCount = 0;
                 setIsBackendConnected(true);
                 setTelemetry(data);
 
@@ -85,11 +99,20 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                     return prev;
                 });
             } catch {
-                if (isMounted) setIsBackendConnected(false);
+                clearTimeout(timeoutId);
+                if (isMounted) {
+                    failureCount++;
+                    // Hanya tandai OFFLINE jika gagal 3x berturut-turut (~300ms) untuk mencegah flickering
+                    if (failureCount >= 3) {
+                        setIsBackendConnected(false);
+                    }
+                }
+            } finally {
+                isFetching = false;
             }
         };
 
-        const interval = setInterval(fetchTrajectory, 50);
+        const interval = setInterval(fetchTrajectory, 100);
         return () => {
             isMounted = false;
             clearInterval(interval);
