@@ -1,200 +1,82 @@
-import asyncio
-import json
-import math
-import time
-from pymavlink import mavutil
-import websockets
+"""
+Camera Proxy — meneruskan MJPEG stream dari unified_rov_server.py (Jetson)
+ke frontend, tanpa frontend perlu tahu IP Jetson secara langsung.
 
-MAVLINK_UDP_PORT = 'udpin:0.0.0.0:14770'
-TIMEOUT_THRESHOLD = 5.0  # Detik tanpa data sebelum dianggap MAVLink terputus
+Service ini KHUSUS untuk video Camera 01. Data QR ditangani oleh
+service terpisah: qr_proxy.py (port berbeda), supaya panel Camera 01
+dan panel QR Code Detector di frontend punya backend independen —
+salah satu down/restart tidak mematikan yang lain.
 
-connected_clients = set()
-pixhawk_link = None
+Jalankan di komputer yang PUNYA akses ZeroTier ke Jetson (laptop Anda / server GCS)
+— BUKAN di Jetson itu sendiri.
+
+Install dependency:
+    pip install fastapi uvicorn httpx
+
+Jalankan:
+    python3 camera_proxy.py
+    # atau: uvicorn camera_proxy:app --host 0.0.0.0 --port 8090
+"""
+
+import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+# --- KONFIGURASI: sesuaikan dengan IP ZeroTier Jetson Anda ---
+JETSON_CAM1_URL = "http://10.147.48.168:9010/video_feed"
+# JETSON_CAM2_URL = "http://<ip-jetson-kedua-jika-ada>:9010/video_feed"
+
+app = FastAPI(title="ROV Camera Proxy")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # produksi: ganti "*" dengan domain website Anda
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
-async def handler(websocket, path=None):
-    connected_clients.add(websocket)
-    print(f'[WS CLIENT] Client terhubung dari: {websocket.remote_address}')
-    try:
-        await websocket.wait_closed()
-    finally:
-        connected_clients.discard(websocket)
-        print(f'[WS CLIENT] Client {websocket.remote_address} terputus.')
-
-
-def create_mavlink_connection():
-    """Mencoba mengikat socket UDP MAVLink."""
-    try:
-        link = mavutil.mavlink_connection(MAVLINK_UDP_PORT)
-        print(
-            f'[MAVLINK] Socket UDP terikat pada {MAVLINK_UDP_PORT}. Menunggu'
-            ' stream...'
-        )
-        return link
-    except Exception as e:
-        print(f'[ERROR] Gagal mengikat socket MAVLink UDP: {e}')
-        return None
-
-
-async def read_pixhawk_telemetry():
-    global pixhawk_link
-
-    last_print_time = 0
-    last_heartbeat_send_time = 0
-    last_stream_req_time = 0
-    last_rx_time = time.monotonic()
-    is_connected = False
-
-    # Inisialisasi awal koneksi
-    pixhawk_link = create_mavlink_connection()
-
-    while True:
-        current_time = time.monotonic()
-
-        # -------------------------------------------------------------------
-        # 1. PENANGANAN RECONNECTION & TIMEOUT (Jika data terhenti > 5 detik)
-        # -------------------------------------------------------------------
-        if pixhawk_link is None or (
-            current_time - last_rx_time > TIMEOUT_THRESHOLD
-        ):
-            if is_connected or pixhawk_link is None:
-                print(
-                    f'[WARNING] MAVLink Timeout / Terputus (>{TIMEOUT_THRESHOLD}s tanpa'
-                    ' data). Mencoba reconnect...'
-                )
-                is_connected = False
-
-                # Tutup socket lama secara bersih
-                if pixhawk_link:
-                    try:
-                        pixhawk_link.close()
-                    except Exception:
-                        pass
-                    pixhawk_link = None
-
-                # Informasikan seluruh client WebSocket bahwa MAVLink Offline
-                if connected_clients:
-                    status_payload = json.dumps(
-                        {'type': 'status', 'mavlink_online': False}
-                    )
-                    await asyncio.gather(
-                        *[c.send(status_payload) for c in connected_clients],
-                        return_exceptions=True,
-                    )
-
-            # Percobaan Re-inisialisasi
-            pixhawk_link = create_mavlink_connection()
-            last_rx_time = current_time  # Reset timer untuk cooldown
-            # Jeda 2 detik sebelum perulangan berikutnya
-            await asyncio.sleep(2.0)
-            continue
-
-        # -------------------------------------------------------------------
-        # 2. KIRIM HEARTBEAT BERKALA (Setiap 1 detik)
-        # -------------------------------------------------------------------
-        if current_time - last_heartbeat_send_time >= 1.0:
-            try:
-                pixhawk_link.mav.heartbeat_send(
-                    mavutil.mavlink.MAV_TYPE_GCS,
-                    mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-                    0,
-                    0,
-                    0,
-                )
-                last_heartbeat_send_time = current_time
-            except Exception as e:
-                print(f'[ERROR] Gagal mengirim heartbeat: {e}')
-
-        # -------------------------------------------------------------------
-        # 3. REQUEST DATA STREAM BERKALA (Setiap 5 detik)
-        # -------------------------------------------------------------------
-        if current_time - last_stream_req_time >= 5.0:
-            try:
-                tgt_sys = (
-                    pixhawk_link.target_system if pixhawk_link.target_system else 1
-                )
-                tgt_comp = (
-                    pixhawk_link.target_component if pixhawk_link.target_component else 1
-                )
-
-                pixhawk_link.mav.request_data_stream_send(
-                    tgt_sys, tgt_comp, mavutil.mavlink.MAV_DATA_STREAM_EXTRA1, 20, 1
-                )
-                last_stream_req_time = current_time
-            except Exception as e:
-                print(f'[ERROR] Gagal request data stream: {e}')
-
-        # -------------------------------------------------------------------
-        # 4. MEMBACA & MENGOSONGKAN BUFFER DATA MAVLINK
-        # -------------------------------------------------------------------
+@app.get("/api/camera1/stream")
+async def camera1_stream():
+    timeout = httpx.Timeout(10.0, read=None)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            while True:
-                msg = pixhawk_link.recv_match(blocking=False)
-                if not msg:
-                    break  # Buffer kosong
+            upstream = await client.send(
+                client.build_request("GET", JETSON_CAM1_URL), stream=True
+            )
+        except httpx.ConnectError as e:
+            raise HTTPException(
+                status_code=502, detail=f"Tidak bisa konek ke Jetson: {e}"
+            )
 
-                # Update timestamp paket data masuk
-                last_rx_time = current_time
+    if upstream.status_code != 200:
+        raise HTTPException(
+            status_code=502, detail=f"Jetson merespons status {upstream.status_code}"
+        )
 
-                # Jika sebelumnya offline dan sekarang data mulai masuk kembali
-                if not is_connected:
-                    is_connected = True
-                    print('[SUCCESS] MAVLink terhubung kembali! Data stream aktif.')
-                    if connected_clients:
-                        status_payload = json.dumps(
-                            {'type': 'status', 'mavlink_online': True}
-                        )
-                        await asyncio.gather(
-                            *[c.send(status_payload)
-                              for c in connected_clients],
-                            return_exceptions=True,
-                        )
+    content_type = upstream.headers.get(
+        "content-type", "multipart/x-mixed-replace; boundary=frame"
+    )
 
-                msg_type = msg.get_type()
+    async def stream_and_close():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
 
-                if msg_type == 'HEARTBEAT':
-                    pixhawk_link.target_system = msg.get_srcSystem()
-                    pixhawk_link.target_component = msg.get_srcComponent()
-
-                elif msg_type == 'ATTITUDE':
-                    roll_deg = math.degrees(msg.roll)
-                    pitch_deg = math.degrees(msg.pitch)
-                    yaw_deg = (math.degrees(msg.yaw) + 360) % 360
-
-                    if current_time - last_print_time >= 0.5:
-                        print(
-                            f'[MAVLINK] Roll: {roll_deg:.2f}° | Pitch: {pitch_deg:.2f}° |'
-                            f' Yaw: {yaw_deg:.2f}°'
-                        )
-                        last_print_time = current_time
-
-                    if connected_clients:
-                        telemetry_data = {
-                            'type': 'telemetry',
-                            'roll': round(roll_deg, 2),
-                            'pitch': round(pitch_deg, 2),
-                            'yaw': round(yaw_deg, 2),
-                        }
-                        payload = json.dumps(telemetry_data)
-                        await asyncio.gather(
-                            *[c.send(payload) for c in connected_clients],
-                            return_exceptions=True,
-                        )
-
-        except Exception as e:
-            print(f'[WARNING] Error pembacaan socket MAVLink: {e}')
-
-        await asyncio.sleep(0.001)
+    return StreamingResponse(stream_and_close(), media_type=content_type)
 
 
-async def main():
-    async with websockets.serve(handler, '0.0.0.0', 8082):
-        print('[SERVER ACTIVE] Telemetry Bridge ROV aktif di ws://0.0.0.0:8082')
-        await read_pixhawk_telemetry()
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "service": "camera_proxy"}
 
 
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print('\n[STOP] Telemetry Bridge dimatikan.')
+if __name__ == "__main__":
+    import uvicorn
+
+    print("[CAMERA PROXY] Aktif di http://0.0.0.0:8090")
+    print(f"[CAMERA PROXY] Meneruskan dari: {JETSON_CAM1_URL}")
+    uvicorn.run(app, host="0.0.0.0", port=8090)

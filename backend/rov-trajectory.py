@@ -9,7 +9,7 @@ import time
 # Konfigurasi Endpoint MAVLink & Server
 # ---------------------------------------------------------------------------
 # Endpoint UDP untuk menerima data telemetri MAVLink dari Pixhawk / Companion Computer
-MAVLINK_UDP_ENDPOINT = 'udpin:0.0.0.0:14553'
+MAVLINK_UDP_ENDPOINT = 'udpin:10.147.48.226:14553'
 HEARTBEAT_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 3.0
 
