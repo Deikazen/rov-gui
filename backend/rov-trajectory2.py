@@ -1,3 +1,52 @@
+"""
+================================================================================
+ROV 3D TRAJECTORY & TELEMETRY BACKEND (DEAD RECKONING MODEL)
+================================================================================
+
+DESKRIPSI SISTEM:
+Sistem ini berfungsi sebagai backend perantara (middleware) yang menerima 
+telemetri MAVLink dari Pixhawk (melalui BlueOS di Onboard Computer) dan 
+menyediakannya ke Ground Control Station (GCS) melalui REST API.
+
+METODOLOGI ESTIMASI POSISI (X, Y, Z, YAW):
+Karena wahana beroperasi di bawah air tanpa sensor posisi absolut eksternal 
+(GPS tidak dapat menembus air dan belum menggunakan akustik DVL/USBL), sistem 
+menggunakan pendekatan hybrid sensor & dead reckoning:
+
+1. Orientasi / Yaw (Heading):
+   - Diperoleh langsung dari internal IMU (Kompas + Giroskop) Pixhawk melalui 
+     pesan MAVLink 'ATTITUDE'. Nilai dikonversi ke derajat (0 - 360 deg).
+
+2. Sumbu Z (Kedalaman / Depth):
+   - Diperoleh dari sensor tekanan hidrostatis eksternal (Bar30 / MS5837 via I2C) 
+     yang diolah EKF ArduSub melalui pesan 'GLOBAL_POSITION_INT' (field relative_alt).
+
+3. Sumbu Horizontal X & Y (Dead Reckoning berbasis Model Propulsi):
+   - Membaca deviasi sinyal kendali PWM thruster dari pesan 'SERVO_OUTPUT_RAW'.
+   - Nilai PWM (1100-1900 us) dikurangi titik netral (1500 us) dengan deadband filter.
+   - Deviasi dikalikan konstanta empiris (K_SURGE & K_SWAY) untuk menghasilkan 
+     estimasi kecepatan linier pada koordinat wahana (Body-Frame Velocity).
+   - Kecepatan lokal ditransformasi ke koordinat global kolam (World-Frame) 
+     menggunakan sudut Yaw:
+         dx = (v_surge * cos(yaw) - v_sway * sin(yaw)) * dt
+         dy = (v_surge * sin(yaw) + v_sway * cos(yaw)) * dt
+   - Posisi diupdate secara berkala: X = X + dx, Y = Y + dy.
+
+CATATAN PENGUJIAN & TUNING:
+- Sistem ini dirancang untuk area terbatas kolam uji (10 x 10 meter) air tenang.
+- Lakukan kalibrasi empiris konstanta K_SURGE dan K_SWAY jika pergeseran terlalu 
+  cepat/lambat dibanding gerakan fisik ROV.
+- Gunakan endpoint /api/origin/reset secara berkala untuk mereset akumulasi drift.
+
+ARSITEKTUR DATA:
+[Pixhawk FC] --(UART/USB)--> [Jetson (BlueOS)] --(UDP 14553)--> [Script Ini] 
+                                                                    |
+                                                            (HTTP REST :8007)
+                                                                    v
+                                                               [GCS / UI]
+================================================================================
+"""
+
 import time
 import math
 import threading
@@ -13,15 +62,26 @@ HEARTBEAT_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 3.0
 HTTP_PORT = 8007
 
+# ---------------------------------------------------------------------------
+# Parameter Kalibrasi Dead Reckoning (Kolam 10x10 m)
+# ---------------------------------------------------------------------------
+# Konstanta kecepatan (meter/detik per satuan deviasi PWM dari 1500)
+# Nilai ini dapat disesuaikan berdasarkan kalibrasi pengujian di kolam:
+K_SURGE = 0.0001   # Skala kecepatan maju/mundur (Surge)
+K_SWAY = 0.0001   # Skala kecepatan geser samping (Sway/Strafe)
+
+PWM_NEUTRAL = 1500
+PWM_DEADBAND = 25  # Rentang toleransi (1475 - 1525 us) dianggap motor diam
+
 app = Flask(__name__)
 CORS(app)
 
 state_lock = threading.Lock()
 
-# Sumber data default ('real' untuk data fisik sensor, 'dummy' untuk simulasi)
+# Sumber data aktif ('real' untuk wahana fisik, 'dummy' untuk simulasi UI)
 current_source = 'real'
 
-# Data mentah dari sensor / MAVLink
+# State data posisi & telemetri aktual
 real_data = {
     'x': 0.0,
     'y': 0.0,
@@ -30,7 +90,7 @@ real_data = {
     'mavlink_connected': False,
 }
 
-# Data simulasi tiruan untuk pengujian tanpa robot
+# Data tiruan untuk pengetesan tampilan GCS tanpa robot fisik
 dummy_data = {
     'x': 0.0,
     'y': 0.0,
@@ -38,7 +98,7 @@ dummy_data = {
     'yaw': 0.0,
 }
 
-# Titik origin kalibrasi (offset)
+# Titik offset koordinat (Origin)
 origin = {
     'x': 0.0,
     'y': 0.0,
@@ -50,7 +110,7 @@ origin = {
 # MAVLink Background Worker Thread
 # ---------------------------------------------------------------------------
 def mavlink_worker():
-    """Menerima data telemetri posisi & orientasi dari Pixhawk via BlueOS forwarding."""
+    """Menerima dan memproses data telemetri dari Pixhawk via UDP bridge BlueOS."""
     while True:
         master = None
         try:
@@ -58,7 +118,7 @@ def mavlink_worker():
                 f"[MAVLINK] Mendengarkan paket UDP di {MAVLINK_UDP_ENDPOINT} ...")
             master = mavutil.mavlink_connection(MAVLINK_UDP_ENDPOINT)
 
-            # 1. Tangkap heartbeat resmi dari Autopilot (Abaikan router comp_id 0)
+            # 1. Menunggu Heartbeat valid dari Autopilot (Component ID == 1)
             target_sys = 1
             target_comp = 1
             t_start = time.time()
@@ -66,11 +126,11 @@ def mavlink_worker():
             while True:
                 hb = master.recv_match(
                     type='HEARTBEAT', blocking=True, timeout=1.0)
+                print('HEARBEAT diterima')
                 if hb is not None:
                     src_sys = hb.get_srcSystem()
                     src_comp = hb.get_srcComponent()
 
-                    # Autopilot Pixhawk/ArduSub selalu memiliki Component ID == 1
                     if src_comp == 1 and src_sys != 0:
                         target_sys = src_sys
                         target_comp = src_comp
@@ -87,27 +147,24 @@ def mavlink_worker():
             with state_lock:
                 real_data['mavlink_connected'] = True
 
-            # 2. Request data stream posisi (10 Hz)
+            # 2. Request Data Stream (10 Hz) dari Pixhawk
             master.mav.request_data_stream_send(
-                target_sys,
-                target_comp,
-                mavutil.mavlink.MAV_DATA_STREAM_POSITION,
-                10,
-                1,
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_POSITION, 10, 1
             )
-
-            # Request data stream attitude / orientasi (10 Hz)
             master.mav.request_data_stream_send(
-                target_sys,
-                target_comp,
-                mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
-                10,
-                1,
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_EXTRA1, 10, 1
+            )
+            master.mav.request_data_stream_send(
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_RAW_CONTROLLER, 10, 1
             )
 
             last_msg_time = time.time()
+            last_servo_time = time.time()
 
-            # 3. Looping penerimaan paket MAVLink
+            # 3. Looping Utama Pemrosesan Paket
             while True:
                 msg = master.recv_match(blocking=True, timeout=1.0)
 
@@ -118,21 +175,70 @@ def mavlink_worker():
                     with state_lock:
                         real_data['mavlink_connected'] = True
 
-                        if msg_type == 'LOCAL_POSITION_NED':
-                            real_data['x'] = float(msg.x)
-                            real_data['y'] = float(msg.y)
-                            real_data['z'] = float(msg.z)
-
-                        elif msg_type == 'GLOBAL_POSITION_INT':
-                            if hasattr(msg, 'relative_alt'):
-                                real_data['z'] = max(
-                                    0.0, -float(msg.relative_alt) / 1000.0)
-
-                        elif msg_type == 'ATTITUDE':
+                        # --- A. PARSING ATTITUDE (HEADING / YAW) ---
+                        if msg_type == 'ATTITUDE':
                             yaw_deg = (math.degrees(msg.yaw) + 360.0) % 360.0
                             real_data['yaw'] = yaw_deg
 
-                # Timeout jika tidak ada paket masuk selama lebih dari 5 detik
+                        # --- B. PARSING KEDALAMAN (DEPTH / SUMBU Z) ---
+                        elif msg_type == 'GLOBAL_POSITION_INT':
+                            if hasattr(msg, 'relative_alt'):
+                                # relative_alt dalam milimeter negatif -> meter positif
+                                real_data['z'] = max(
+                                    0.0, -float(msg.relative_alt) / 1000.0)
+
+                        # --- C. ESTIMASI POSISI X & Y (DEAD RECKONING) ---
+                        elif msg_type == 'SERVO_OUTPUT_RAW':
+                            now = time.time()
+                            dt = now - last_servo_time
+                            last_servo_time = now
+
+                            # Proteksi lonjakan dt jika thread sempat terhenti
+                            if dt > 1.0:
+                                dt = 0.1
+
+                            # Baca kanal PWM output motor
+                            s1 = getattr(msg, 'servo1_raw', 0)
+                            s2 = getattr(msg, 'servo2_raw', 0)
+                            s3 = getattr(msg, 'servo3_raw', 0)
+                            s4 = getattr(msg, 'servo4_raw', 0)
+                            print(f'servo 1={s1}')
+                            print(f'servo 2={s2}')
+                            print(f'servo 3={s3}')
+                            print(f'servo 4={s4}')
+
+                            # Jalankan integrasi hanya jika wahana berstatus ARM (PWM > 900)
+                            if s1 > 900 and s2 > 900:
+                                def calc_delta(pwm):
+                                    delta = pwm - PWM_NEUTRAL
+                                    return 0 if abs(delta) <= PWM_DEADBAND else delta
+
+                                d1 = calc_delta(s1)
+                                d2 = calc_delta(s2)
+                                d3 = calc_delta(s3)
+                                d4 = calc_delta(d4 if 'd4' in locals() else s4)
+
+                                # Pemetaan Vektor Propulsi (SimpleROV-5 / Standard Frame)
+                                delta_surge = (d1 + d2) / 2.0
+                                delta_sway = (
+                                    d1 - d2) / 2.0 if (d3 == 0 and d4 == 0) else (d3 + d4) / 2.0
+
+                                # Estimasi Kecepatan Lokal (Body-Frame)
+                                v_surge = delta_surge * K_SURGE
+                                v_sway = delta_sway * K_SWAY
+
+                                # Transformasi Rotasi ke Koordinat Global Kolam (World-Frame)
+                                yaw_rad = math.radians(real_data['yaw'])
+                                dx = (v_surge * math.cos(yaw_rad) -
+                                      v_sway * math.sin(yaw_rad)) * dt
+                                dy = (v_surge * math.sin(yaw_rad) +
+                                      v_sway * math.cos(yaw_rad)) * dt
+
+                                # Akumulasi Pergeseran Posisi
+                                real_data['x'] += dx
+                                real_data['y'] += dy
+
+                # Deteksi Timeout Komunikasi
                 if time.time() - last_msg_time > 5.0:
                     print("[MAVLINK] Koneksi MAVLink terputus (timeout > 5s)...")
                     with state_lock:
@@ -156,7 +262,7 @@ def mavlink_worker():
 # Dummy Simulation Worker Thread (20 Hz)
 # ---------------------------------------------------------------------------
 def dummy_worker():
-    """Menghasilkan pola trajectory halus untuk pengujian UI tanpa perangkat fisik."""
+    """Menghasilkan pergerakan koordinat dummy berbentuk lintasan angka 8."""
     t0 = time.time()
     while True:
         t = time.time() - t0
@@ -183,23 +289,19 @@ def dummy_worker():
 
 
 # ---------------------------------------------------------------------------
-# API Routes
+# API Routes (Untuk Konsumsi Frontend GCS)
 # ---------------------------------------------------------------------------
 @app.route('/api/trajectory', methods=['GET'])
 def get_telemetry():
-    """Mengembalikan posisi relatif dari origin, data raw, offset origin, dan status koneksi."""
+    """Mengembalikan data koordinat relatif, data mentah, dan status koneksi."""
     with state_lock:
         source = current_source
         if source == 'real':
-            raw_x = real_data['x']
-            raw_y = real_data['y']
-            raw_z = real_data['z']
+            raw_x, raw_y, raw_z = real_data['x'], real_data['y'], real_data['z']
             yaw = real_data['yaw']
             connected = real_data['mavlink_connected']
         else:
-            raw_x = dummy_data['x']
-            raw_y = dummy_data['y']
-            raw_z = dummy_data['z']
+            raw_x, raw_y, raw_z = dummy_data['x'], dummy_data['y'], dummy_data['z']
             yaw = dummy_data['yaw']
             connected = real_data['mavlink_connected']
 
@@ -226,7 +328,7 @@ def get_telemetry():
 @app.route('/api/origin/calibrate', methods=['POST'])
 @app.route('/api/calibrate', methods=['POST'])
 def calibrate_origin():
-    """Mengatur posisi saat ini sebagai titik (0, 0, 0) baru."""
+    """Mengatur posisi wahana saat ini sebagai titik origin (0, 0, 0)."""
     with state_lock:
         if current_source == 'real':
             origin['x'] = real_data['x']
@@ -239,7 +341,7 @@ def calibrate_origin():
 
         return jsonify({
             'status': 'ok',
-            'message': 'Titik origin berhasil dikalibrasi ke posisi saat ini',
+            'message': 'Titik origin berhasil diset ke posisi saat ini',
             'origin': {
                 'x': round(origin['x'], 3),
                 'y': round(origin['y'], 3),
@@ -250,28 +352,30 @@ def calibrate_origin():
 
 @app.route('/api/origin/reset', methods=['POST'])
 def reset_origin():
-    """Mereset titik origin kembali ke (0, 0, 0)."""
+    """Mereset titik origin dan menghapus akumulasi perhitungan koordinat posisi."""
     with state_lock:
         origin['x'] = 0.0
         origin['y'] = 0.0
         origin['z'] = 0.0
+        real_data['x'] = 0.0
+        real_data['y'] = 0.0
 
         return jsonify({
             'status': 'ok',
-            'message': 'Titik origin di-reset ke default (0, 0, 0)',
+            'message': 'Origin dan akumulasi koordinat di-reset ke default (0, 0, 0)',
             'origin': {'x': 0.0, 'y': 0.0, 'z': 0.0}
         })
 
 
 @app.route('/api/source', methods=['POST'])
 def set_source():
-    """Mengubah sumber data antara 'real' atau 'dummy'."""
+    """Mengganti mode sumber data antara 'real' (wahana asli) atau 'dummy' (simulasi)."""
     global current_source
     payload = request.get_json(silent=True) or {}
     requested = payload.get('source')
 
     if requested not in ('real', 'dummy'):
-        return jsonify({'error': 'source harus "real" atau "dummy"'}), 400
+        return jsonify({'error': 'source harus bernilai "real" atau "dummy"'}), 400
 
     with state_lock:
         current_source = requested
@@ -280,7 +384,7 @@ def set_source():
 
 
 # ---------------------------------------------------------------------------
-# Entrypoint
+# Entrypoint Aplikasi
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     mav_thread = threading.Thread(target=mavlink_worker, daemon=True)
