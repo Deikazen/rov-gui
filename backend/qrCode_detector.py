@@ -10,11 +10,23 @@ Kenapa dipisah jadi service sendiri (bukan ditambahkan ke camera_proxy.py):
   - Bisa di-deploy/scale terpisah, port beda, log beda.
 
 Service ini melakukan 2 hal:
-  1. Polling ke Jetson (/qr_status) tiap ~150ms di background, simpan state terakhir.
+  1. Polling ke Jetson (/qr_status) di background, simpan state terakhir.
   2. Expose state itu ke frontend lewat:
         - GET  /api/qr/status   -> polling biasa (paling gampang dipakai)
         - WS   /ws/qr/status    -> push real-time (instan begitu QR terdeteksi,
                                     ini yang jadi "indikator" yang kamu maksud)
+
+CATATAN PERFORMA (penting!):
+  Endpoint /qr_status di Jetson kemungkinan besar memproses/decode QR dari
+  frame kamera setiap kali di-request -> itu berebut CPU/kamera dengan proses
+  encode video_feed untuk Camera 01. Polling yang terlalu cepat ke sini bisa
+  bikin stream Camera 01 lag/freeze. Makanya sekarang:
+    - Interval polling saat ADA yang nonton (>=1 client WebSocket) dibikin
+      lebih longgar (POLL_INTERVAL_ACTIVE), bukan 150ms lagi.
+    - Saat TIDAK ADA yang nonton, polling jauh lebih jarang
+      (POLL_INTERVAL_IDLE) -> sebelumnya proxy ini polling 150ms TERUS
+      MENERUS walau tidak ada satupun browser yang buka panel QR, ini
+      pemborosan resource Jetson yang sia-sia.
 
 Install dependency:
     pip install fastapi uvicorn httpx websockets
@@ -32,7 +44,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # --- KONFIGURASI: sesuaikan dengan IP ZeroTier Jetson Anda ---
 JETSON_QR_STATUS_URL = "http://10.147.48.168:9010/qr_status"
-POLL_INTERVAL_SEC = 0.15  # ~6-7x/detik, cukup responsif tanpa membebani Jetson
+
+# Saat ada client yang aktif nonton (WebSocket terhubung): masih cukup
+# responsif untuk indikator real-time, tapi jauh lebih longgar dari 150ms
+# supaya tidak berebut CPU/kamera dengan video_feed Camera 01 di Jetson.
+POLL_INTERVAL_ACTIVE = 0.4  # ~2.5x/detik
+
+# Saat TIDAK ada satupun client yang nonton: polling jauh lebih jarang,
+# cukup untuk menjaga status tidak basi kalau ada yang connect mendadak,
+# tanpa terus membebani Jetson secara percuma.
+POLL_INTERVAL_IDLE = 2.0  # 1x/2 detik
 
 app = FastAPI(title="ROV QR Proxy")
 
@@ -60,7 +81,12 @@ active_websockets: list[WebSocket] = []
 
 
 async def poll_jetson_qr_status():
-    """Background task: polling terus-menerus ke Jetson, broadcast tiap ada perubahan."""
+    """Background task: polling terus-menerus ke Jetson, broadcast tiap ada perubahan.
+
+    Interval polling adaptif: cepat kalau ada yang nonton, lambat kalau tidak
+    ada sama sekali -> mengurangi beban ke Jetson (yang juga sedang sibuk
+    encode video_feed untuk Camera 01) saat fitur ini tidak sedang dipakai.
+    """
     global latest_qr_status
     prev_detected = None
 
@@ -94,7 +120,9 @@ async def poll_jetson_qr_status():
                     prev_detected = False
                     await broadcast(latest_qr_status)
 
-            await asyncio.sleep(POLL_INTERVAL_SEC)
+            # Interval adaptif: hanya polling cepat kalau memang ada yang nonton.
+            interval = POLL_INTERVAL_ACTIVE if active_websockets else POLL_INTERVAL_IDLE
+            await asyncio.sleep(interval)
 
 
 async def broadcast(payload: dict):
@@ -141,7 +169,12 @@ async def qr_status_ws(websocket: WebSocket):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "qr_proxy", "jetson_reachable": latest_qr_status["jetson_reachable"]}
+    return {
+        "status": "ok",
+        "service": "qr_proxy",
+        "jetson_reachable": latest_qr_status["jetson_reachable"],
+        "active_viewers": len(active_websockets),
+    }
 
 
 if __name__ == "__main__":
@@ -149,5 +182,6 @@ if __name__ == "__main__":
 
     print("[QR PROXY] Aktif di http://0.0.0.0:8091")
     print(f"[QR PROXY] Polling dari: {JETSON_QR_STATUS_URL}")
+    print(f"[QR PROXY] Interval: {POLL_INTERVAL_ACTIVE}s (aktif) / {POLL_INTERVAL_IDLE}s (idle)")
     print("[QR PROXY] Endpoints: GET /api/qr/status  |  WS /ws/qr/status")
     uvicorn.run(app, host="0.0.0.0", port=8091)

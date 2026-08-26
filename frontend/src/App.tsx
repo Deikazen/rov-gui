@@ -48,7 +48,9 @@ export function App() {
 
   // Data QR real-time: connect ke qr_proxy.py (ws://.../ws/qr/status),
   // otomatis update begitu Camera 01 di Jetson mendeteksi QR code.
-  const { side: qrSide, scanCount: qrScanCount, confidence: qrConf } =
+  // history: SEMUA QR yang pernah berhasil terdeteksi selama sesi ini
+  // (bukan cuma yang terakhir), dipakai tombol "Lihat Link QR" di QrPanel.
+  const { side: qrSide, scanCount: qrScanCount, confidence: qrConf, history: qrHistory } =
     useQrDetector();
 
   // Modal State
@@ -165,7 +167,7 @@ export function App() {
             onSeek={seekCamera}
             streamUrl={CAM2_URL}
           />
-          <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} />
+          <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} history={qrHistory} />
         </div>
 
         <div className="row">
