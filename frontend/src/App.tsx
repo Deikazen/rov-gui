@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSimulation } from "./hooks/useSimulation";
+import { useQrDetector } from "./hooks/useQrDetector"; // <-- BARU: data QR real-time dari qr_proxy.py
 import { Header } from "./components/Header";
 import { CameraPanel } from "./components/CameraPanel";
 import { QrPanel } from "./components/QrPanel";
@@ -27,9 +28,8 @@ export function App() {
     logData,
     altitude,
     altPrev,
-    qrSide,
-    qrScanCount,
-    qrConf,
+    // qrSide, qrScanCount, qrConf TIDAK dipakai lagi dari sini (masih dummy/simulasi).
+    // Data QR panel sekarang diambil real-time dari useQrDetector() di bawah.
     imu,
     rovPos,
     recordedPath,
@@ -45,6 +45,13 @@ export function App() {
     replayTrajectory,
     clearPath,
   } = useSimulation();
+
+  // Data QR real-time: connect ke qr_proxy.py (ws://.../ws/qr/status),
+  // otomatis update begitu Camera 01 di Jetson mendeteksi QR code.
+  // history: SEMUA QR yang pernah berhasil terdeteksi selama sesi ini
+  // (bukan cuma yang terakhir), dipakai tombol "Lihat Link QR" di QrPanel.
+  const { side: qrSide, scanCount: qrScanCount, confidence: qrConf, history: qrHistory } =
+    useQrDetector();
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -169,7 +176,7 @@ export function App() {
             onSeek={seekCamera}
             streamUrl={CAM2_URL}
           />
-          <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} />
+          <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} history={qrHistory} />
         </div>
 
         <div className="row">
