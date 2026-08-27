@@ -207,36 +207,10 @@ def mavlink_worker():
                             print(f'servo 3={s3}')
                             print(f'servo 4={s4}')
 
-                            # Jalankan integrasi hanya jika wahana berstatus ARM (PWM > 900)
-                            if s1 > 900 and s2 > 900:
-                                def calc_delta(pwm):
-                                    delta = pwm - PWM_NEUTRAL
-                                    return 0 if abs(delta) <= PWM_DEADBAND else delta
-
-                                d1 = calc_delta(s1)
-                                d2 = calc_delta(s2)
-                                d3 = calc_delta(s3)
-                                d4 = calc_delta(d4 if 'd4' in locals() else s4)
-
-                                # Pemetaan Vektor Propulsi (SimpleROV-5 / Standard Frame)
-                                delta_surge = (d1 + d2) / 2.0
-                                delta_sway = (
-                                    d1 - d2) / 2.0 if (d3 == 0 and d4 == 0) else (d3 + d4) / 2.0
-
-                                # Estimasi Kecepatan Lokal (Body-Frame)
-                                v_surge = delta_surge * K_SURGE
-                                v_sway = delta_sway * K_SWAY
-
-                                # Transformasi Rotasi ke Koordinat Global Kolam (World-Frame)
-                                yaw_rad = math.radians(real_data['yaw'])
-                                dx = (v_surge * math.cos(yaw_rad) -
-                                      v_sway * math.sin(yaw_rad)) * dt
-                                dy = (v_surge * math.sin(yaw_rad) +
-                                      v_sway * math.cos(yaw_rad)) * dt
-
-                                # Akumulasi Pergeseran Posisi
-                                real_data['x'] += dx
-                                real_data['y'] += dy
+                            if s1 > 1500:
+                                print('Maju')
+                            elif s1 < 1500:
+                                print('mundur')
 
                 # Deteksi Timeout Komunikasi
                 if time.time() - last_msg_time > 5.0:
