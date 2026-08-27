@@ -4,46 +4,38 @@ ROV 3D TRAJECTORY & TELEMETRY BACKEND (DEAD RECKONING MODEL)
 ================================================================================
 
 DESKRIPSI SISTEM:
-Sistem ini berfungsi sebagai backend perantara (middleware) yang menerima 
-telemetri MAVLink dari Pixhawk (melalui BlueOS di Onboard Computer) dan 
-menyediakannya ke Ground Control Station (GCS) melalui REST API.
+Backend perantara (middleware) yang menerima telemetri MAVLink dari Pixhawk 
+(melalui BlueOS di Onboard Computer / Companion) dan menyediakannya ke 
+Ground Control Station (GCS / UI) melalui REST API (port 8007).
 
-METODOLOGI ESTIMASI POSISI (X, Y, Z, YAW):
-Karena wahana beroperasi di bawah air tanpa sensor posisi absolut eksternal 
-(GPS tidak dapat menembus air dan belum menggunakan akustik DVL/USBL), sistem 
-menggunakan pendekatan hybrid sensor & dead reckoning:
-
+LOGIKA ESTIMASI POSISI (X, Y, Z, YAW):
 1. Orientasi / Yaw (Heading):
-   - Diperoleh langsung dari internal IMU (Kompas + Giroskop) Pixhawk melalui 
-     pesan MAVLink 'ATTITUDE'. Nilai dikonversi ke derajat (0 - 360 deg).
+   - Diterima dari pesan MAVLink 'ATTITUDE' (IMU/Kompas Pixhawk).
+   - Dikonversi ke derajat 0 - 360° (0° = North/+Y, 90° = East/+X).
 
 2. Sumbu Z (Kedalaman / Depth):
-   - Diperoleh dari sensor tekanan hidrostatis eksternal (Bar30 / MS5837 via I2C) 
-     yang diolah EKF ArduSub melalui pesan 'GLOBAL_POSITION_INT' (field relative_alt).
+   - Diterima dari pesan 'GLOBAL_POSITION_INT' (relative_alt) atau 'SCALED_PRESSURE'.
 
-3. Sumbu Horizontal X & Y (Dead Reckoning berbasis Model Propulsi):
-   - Membaca deviasi sinyal kendali PWM thruster dari pesan 'SERVO_OUTPUT_RAW'.
-   - Nilai PWM (1100-1900 us) dikurangi titik netral (1500 us) dengan deadband filter.
-   - Deviasi dikalikan konstanta empiris (K_SURGE & K_SWAY) untuk menghasilkan 
-     estimasi kecepatan linier pada koordinat wahana (Body-Frame Velocity).
-   - Kecepatan lokal ditransformasi ke koordinat global kolam (World-Frame) 
-     menggunakan sudut Yaw:
-         dx = (v_surge * cos(yaw) - v_sway * sin(yaw)) * dt
-         dy = (v_surge * sin(yaw) + v_sway * cos(yaw)) * dt
-   - Posisi diupdate secara berkala: X = X + dx, Y = Y + dy.
+3. Sumbu Horizontal X & Y (Dead Reckoning dari SERVO_OUTPUT_RAW):
+   - Servo 1 & Servo 2: Kendali Maju / Mundur (Surge)
+       * PWM > 1500 (+ deadband): Maju (v_surge > 0)
+       * PWM < 1500 (- deadband): Mundur (v_surge < 0)
+       * PWM == 1500 (rentang netral): Diam (v_surge = 0)
+       * dev_surge = (dev_servo1 + dev_servo2) / 2.0
+       * v_surge = dev_surge * K_SURGE (m/s)
+   - Servo 5: Kendali Kanan / Kiri (Sway / Strafe)
+       * PWM > 1500 (+ deadband): Geser Kanan (v_sway > 0)
+       * PWM < 1500 (- deadband): Geser Kiri (v_sway < 0)
+       * PWM == 1500 (rentang netral): Diam (v_sway = 0)
+       * dev_sway = dev_servo5
+       * v_sway = dev_sway * K_SWAY (m/s)
+   - Transformasi Koordinat Body-Frame ke World-Frame Kolam berbasis Yaw:
+       * dx = (v_surge * sin(yaw_rad) + v_sway * cos(yaw_rad)) * dt
+       * dy = (v_surge * cos(yaw_rad) - v_sway * sin(yaw_rad)) * dt
+   - Integrasi Posisi:
+       * X = X + dx
+       * Y = Y + dy
 
-CATATAN PENGUJIAN & TUNING:
-- Sistem ini dirancang untuk area terbatas kolam uji (10 x 10 meter) air tenang.
-- Lakukan kalibrasi empiris konstanta K_SURGE dan K_SWAY jika pergeseran terlalu 
-  cepat/lambat dibanding gerakan fisik ROV.
-- Gunakan endpoint /api/origin/reset secara berkala untuk mereset akumulasi drift.
-
-ARSITEKTUR DATA:
-[Pixhawk FC] --(UART/USB)--> [Jetson (BlueOS)] --(UDP 14553)--> [Script Ini] 
-                                                                    |
-                                                            (HTTP REST :8007)
-                                                                    v
-                                                               [GCS / UI]
 ================================================================================
 """
 
@@ -63,22 +55,23 @@ RECONNECT_DELAY_S = 3.0
 HTTP_PORT = 8007
 
 # ---------------------------------------------------------------------------
-# Parameter Kalibrasi Dead Reckoning (Kolam 10x10 m)
+# Parameter Kalibrasi Dead Reckoning (PWM -> Kecepatan m/s)
 # ---------------------------------------------------------------------------
-# Konstanta kecepatan (meter/detik per satuan deviasi PWM dari 1500)
-# Nilai ini dapat disesuaikan berdasarkan kalibrasi pengujian di kolam:
-K_SURGE = 0.0001   # Skala kecepatan maju/mundur (Surge)
-K_SWAY = 0.0001   # Skala kecepatan geser samping (Sway/Strafe)
-
+# Nilai netral PWM ESC (1500 us) dan rentang toleransi deadband
 PWM_NEUTRAL = 1500
-PWM_DEADBAND = 25  # Rentang toleransi (1475 - 1525 us) dianggap motor diam
+PWM_DEADBAND = 25  # Rentang (1475 - 1525 us) dianggap netral / motor diam
+
+# Konstanta pengali kecepatan linier (meter/detik per satuan deviasi PWM)
+# Contoh: deviasi +300 (PWM 1800) * 0.001 = 0.3 m/s
+K_SURGE = 0.001    # Faktor kecepatan Maju / Mundur (Servo 1 & 2)
+K_SWAY = 0.001     # Faktor kecepatan Kanan / Kiri (Servo 5)
 
 app = Flask(__name__)
 CORS(app)
 
 state_lock = threading.Lock()
 
-# Sumber data aktif ('real' untuk wahana fisik, 'dummy' untuk simulasi UI)
+# Sumber data aktif ('real' untuk Pixhawk fisik, 'dummy' untuk simulasi UI)
 current_source = 'real'
 
 # State data posisi & telemetri aktual
@@ -88,9 +81,14 @@ real_data = {
     'z': 0.0,
     'yaw': 0.0,
     'mavlink_connected': False,
+    'servo1': 1700,
+    'servo2': 1700,
+    'servo5': 1500,
+    'v_surge': 0.0,
+    'v_sway': 0.0,
 }
 
-# Data tiruan untuk pengetesan tampilan GCS tanpa robot fisik
+# Data tiruan untuk pengujian tanpa robot fisik
 dummy_data = {
     'x': 0.0,
     'y': 0.0,
@@ -98,7 +96,7 @@ dummy_data = {
     'yaw': 0.0,
 }
 
-# Titik offset koordinat (Origin)
+# Titik offset koordinat (Origin Kalibrasi)
 origin = {
     'x': 0.0,
     'y': 0.0,
@@ -106,11 +104,25 @@ origin = {
 }
 
 
+def apply_deadband(val, neutral=PWM_NEUTRAL, deadband=PWM_DEADBAND):
+    """
+    Menghitung deviasi PWM terhadap nilai netral (1500 us).
+    Jika nilai berada di rentang netral (neutral - deadband s/d neutral + deadband),
+    hasilnya adalah 0.0 (diam).
+    """
+    if val <= 0:
+        return 0.0
+    diff = val - neutral
+    if abs(diff) <= deadband:
+        return 0.0
+    return float(diff)
+
+
 # ---------------------------------------------------------------------------
 # MAVLink Background Worker Thread
 # ---------------------------------------------------------------------------
 def mavlink_worker():
-    """Menerima dan memproses data telemetri dari Pixhawk via UDP bridge BlueOS."""
+    """Menerima dan memproses data telemetri MAVLink dari Pixhawk via UDP."""
     while True:
         master = None
         try:
@@ -118,7 +130,7 @@ def mavlink_worker():
                 f"[MAVLINK] Mendengarkan paket UDP di {MAVLINK_UDP_ENDPOINT} ...")
             master = mavutil.mavlink_connection(MAVLINK_UDP_ENDPOINT)
 
-            # 1. Menunggu Heartbeat valid dari Autopilot (Component ID == 1)
+            # 1. Menunggu Heartbeat valid dari Autopilot
             target_sys = 1
             target_comp = 1
             t_start = time.time()
@@ -126,18 +138,18 @@ def mavlink_worker():
             while True:
                 hb = master.recv_match(
                     type='HEARTBEAT', blocking=True, timeout=1.0)
-                print('HEARBEAT diterima')
                 if hb is not None:
                     src_sys = hb.get_srcSystem()
                     src_comp = hb.get_srcComponent()
 
-                    if src_comp == 1 and src_sys != 0:
+                    # Terima pesan heartbeat dari autopilot (Component 1) atau komponen sistem
+                    if src_sys != 0:
                         target_sys = src_sys
                         target_comp = src_comp
                         master.target_system = target_sys
                         master.target_component = target_comp
                         print(
-                            f"[MAVLINK] Autopilot terdeteksi -> Sys ID: {target_sys}, Comp ID: {target_comp}")
+                            f"[MAVLINK] Heartbeat terdeteksi -> Sys ID: {target_sys}, Comp ID: {target_comp}")
                         break
 
                 if time.time() - t_start > HEARTBEAT_TIMEOUT_S:
@@ -147,10 +159,10 @@ def mavlink_worker():
             with state_lock:
                 real_data['mavlink_connected'] = True
 
-            # 2. Request Data Stream (10 Hz) dari Pixhawk
+            # 2. Request Data Stream ke Pixhawk (10 Hz)
             master.mav.request_data_stream_send(
                 target_sys, target_comp,
-                mavutil.mavlink.MAV_DATA_STREAM_POSITION, 10, 1
+                mavutil.mavlink.MAV_DATA_STREAM_ALL, 10, 1
             )
             master.mav.request_data_stream_send(
                 target_sys, target_comp,
@@ -163,8 +175,9 @@ def mavlink_worker():
 
             last_msg_time = time.time()
             last_servo_time = time.time()
+            last_log_time = time.time()
 
-            # 3. Looping Utama Pemrosesan Paket
+            # 3. Looping Utama Pemrosesan Paket MAVLink
             while True:
                 msg = master.recv_match(blocking=True, timeout=1.0)
 
@@ -175,8 +188,9 @@ def mavlink_worker():
                     with state_lock:
                         real_data['mavlink_connected'] = True
 
-                        # --- A. PARSING ATTITUDE (HEADING / YAW) ---
+                        # --- A. PARSING HEADING / YAW (ATTITUDE) ---
                         if msg_type == 'ATTITUDE':
+                            # msg.yaw dalam radian -> konversi ke derajat (0 - 360)
                             yaw_deg = (math.degrees(msg.yaw) + 360.0) % 360.0
                             real_data['yaw'] = yaw_deg
 
@@ -187,32 +201,85 @@ def mavlink_worker():
                                 real_data['z'] = max(
                                     0.0, -float(msg.relative_alt) / 1000.0)
 
+                        elif msg_type == 'SCALED_PRESSURE':
+                            # Fallback sensor tekanan Bar30
+                            press_diff = max(0.0, msg.press_diff)
+                            real_data['z'] = press_diff / 98.0665
+
                         # --- C. ESTIMASI POSISI X & Y (DEAD RECKONING) ---
                         elif msg_type == 'SERVO_OUTPUT_RAW':
                             now = time.time()
                             dt = now - last_servo_time
                             last_servo_time = now
 
-                            # Proteksi lonjakan dt jika thread sempat terhenti
-                            if dt > 1.0:
-                                dt = 0.1
+                            # Proteksi lonjakan nilai dt saat thread baru aktif atau delay
+                            if dt > 1.0 or dt <= 0.0:
+                                dt = 0.05  # Default ~20 Hz
 
-                            # Baca kanal PWM output motor
-                            s1 = getattr(msg, 'servo1_raw', 0)
-                            s2 = getattr(msg, 'servo2_raw', 0)
-                            s3 = getattr(msg, 'servo3_raw', 0)
-                            s4 = getattr(msg, 'servo4_raw', 0)
-                            print(f'servo 1={s1}')
-                            print(f'servo 2={s2}')
-                            print(f'servo 3={s3}')
-                            print(f'servo 4={s4}')
+                            # 1. Baca nilai PWM dari Servo 1, 2, dan 5
+                            s1 = 1700
+                            s2 = 1700
+                            # s1 = int(getattr(msg, 'servo1_raw', PWM_NEUTRAL))
+                            # s2 = int(getattr(msg, 'servo2_raw', PWM_NEUTRAL))
+                            s5 = int(getattr(msg, 'servo5_raw', PWM_NEUTRAL))
 
-                            if s1 > 1500:
-                                print('Maju')
-                            elif s1 < 1500:
-                                print('mundur')
+                            real_data['servo1'] = s1
+                            real_data['servo2'] = s2
+                            real_data['servo5'] = s5
 
-                # Deteksi Timeout Komunikasi
+                            # 2. Hitung deviasi PWM terhadap titik netral (1500 us) + filter deadband
+                            dev_s1 = apply_deadband(s1)
+                            dev_s2 = apply_deadband(s2)
+                            dev_s5 = apply_deadband(s5)
+
+                            # 3. Logika Maju / Mundur (Surge) -> Servo 1 & 2
+                            #    - Nilai > 1500 : Maju (+dev_surge)
+                            #    - Nilai < 1500 : Mundur (-dev_surge)
+                            #    - Nilai == 1500: Netral/Diam (0)
+                            dev_surge = (dev_s1 + dev_s2) / 2.0
+                            # Kecepatan linier maju/mundur (m/s)
+                            v_surge = dev_surge * K_SURGE
+
+                            # 4. Logika Kanan / Kiri (Sway / Strafe) -> Servo 5
+                            #    - Nilai > 1500 : Geser Kanan (+dev_sway)
+                            #    - Nilai < 1500 : Geser Kiri (-dev_sway)
+                            #    - Nilai == 1500: Netral/Diam (0)
+                            dev_sway = dev_s5
+                            # Kecepatan linier geser kanan/kiri (m/s)
+                            v_sway = dev_sway * K_SWAY
+
+                            real_data['v_surge'] = v_surge
+                            real_data['v_sway'] = v_sway
+
+                            # 5. Transformasi Kecepatan Body-Frame ke World-Frame menggunakan Yaw Pixhawk
+                            #    Orientasi Kompas: 0° = North (+Y), 90° = East (+X)
+                            yaw_deg = real_data['yaw']
+                            yaw_rad = math.radians(yaw_deg)
+
+                            dx = (v_surge * math.sin(yaw_rad) +
+                                  v_sway * math.cos(yaw_rad)) * dt
+                            dy = (v_surge * math.cos(yaw_rad) -
+                                  v_sway * math.sin(yaw_rad)) * dt
+
+                            # 6. Akumulasi pergeseran posisi X dan Y
+                            real_data['x'] += dx
+                            real_data['y'] += dy
+
+                            # 7. Tampilkan log pergerakan ke terminal setiap 0.5 detik
+                            now_log = time.time()
+                            if now_log - last_log_time >= 0.5:
+                                last_log_time = now_log
+                                surge_lbl = "MAJU" if dev_surge > 0 else (
+                                    "MUNDUR" if dev_surge < 0 else "DIAM")
+                                sway_lbl = "KANAN" if dev_sway > 0 else (
+                                    "KIRI" if dev_sway < 0 else "DIAM")
+                                print(
+                                    f"[DEAD RECKONING] S1:{s1} S2:{s2} S5:{s5} | "
+                                    f"Surge:{surge_lbl} ({v_surge:+.2f}m/s) Sway:{sway_lbl} ({v_sway:+.2f}m/s) | "
+                                    f"Yaw:{yaw_deg:05.1f}° | POS: (X:{real_data['x']:+.2f}m, Y:{real_data['y']:+.2f}m, Z:{real_data['z']:.2f}m)"
+                                )
+
+                # Deteksi Timeout Komunikasi MAVLink
                 if time.time() - last_msg_time > 5.0:
                     print("[MAVLINK] Koneksi MAVLink terputus (timeout > 5s)...")
                     with state_lock:
@@ -236,7 +303,7 @@ def mavlink_worker():
 # Dummy Simulation Worker Thread (20 Hz)
 # ---------------------------------------------------------------------------
 def dummy_worker():
-    """Menghasilkan pergerakan koordinat dummy berbentuk lintasan angka 8."""
+    """Menghasilkan pergerakan koordinat dummy berbentuk lintasan angka 8 untuk simulasi UI."""
     t0 = time.time()
     while True:
         t = time.time() - t0
@@ -267,17 +334,24 @@ def dummy_worker():
 # ---------------------------------------------------------------------------
 @app.route('/api/trajectory', methods=['GET'])
 def get_telemetry():
-    """Mengembalikan data koordinat relatif, data mentah, dan status koneksi."""
+    """Mengembalikan data koordinat relatif, data mentah, servo status, dan koneksi."""
     with state_lock:
         source = current_source
         if source == 'real':
             raw_x, raw_y, raw_z = real_data['x'], real_data['y'], real_data['z']
             yaw = real_data['yaw']
             connected = real_data['mavlink_connected']
+            s1 = real_data['servo1']
+            s2 = real_data['servo2']
+            s5 = real_data['servo5']
+            v_surge = real_data['v_surge']
+            v_sway = real_data['v_sway']
         else:
             raw_x, raw_y, raw_z = dummy_data['x'], dummy_data['y'], dummy_data['z']
             yaw = dummy_data['yaw']
             connected = real_data['mavlink_connected']
+            s1, s2, s5 = 1500, 1500, 1500
+            v_surge, v_sway = 0.0, 0.0
 
         rel_x = raw_x - origin['x']
         rel_y = raw_y - origin['y']
@@ -296,6 +370,11 @@ def get_telemetry():
             'origin_z': round(origin['z'], 3),
             'yaw': round(yaw, 1),
             'mavlink_connected': connected,
+            'servo1': s1,
+            'servo2': s2,
+            'servo5': s5,
+            'v_surge': round(v_surge, 3),
+            'v_sway': round(v_sway, 3),
         })
 
 
