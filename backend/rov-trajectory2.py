@@ -217,11 +217,11 @@ def mavlink_worker():
                                 dt = 0.05  # Default ~20 Hz
 
                             # 1. Baca nilai PWM dari Servo 1, 2, dan 5
-                            s1 = 1500
-                            s2 = 1500
-                            # s1 = int(getattr(msg, 'servo1_raw', PWM_NEUTRAL))
-                            # s2 = int(getattr(msg, 'servo2_raw', PWM_NEUTRAL))
-                            s5 = int(getattr(msg, 'servo5_raw', PWM_NEUTRAL))
+                            # s1 = 1500
+                            # s2 = 1500
+                            s1 = int(getattr(msg, 'servo1_raw'))
+                            s2 = int(getattr(msg, 'servo2_raw'))
+                            s5 = int(getattr(msg, 'servo5_raw'))
 
                             real_data['servo1'] = s1
                             real_data['servo2'] = s2
