@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { PanelWrapper } from "./PanelWrapper";
+import type { DepthTelemetryData } from "../hooks/useDepth";
 
 interface TelemetryData {
   source: "real" | "dummy";
@@ -12,36 +13,48 @@ interface TelemetryData {
 interface AltitudePanelProps {
   altitude?: number;
   altPrev?: number;
+  depthTelemetry?: DepthTelemetryData;
+  onToggleSource?: (source: "real" | "dummy") => void;
 }
 
-export const AltitudePanel: React.FC<AltitudePanelProps> = () => {
-  const [telemetry, setTelemetry] = useState<TelemetryData>({
+export const AltitudePanel: React.FC<AltitudePanelProps> = ({
+  altitude: fallbackAltitude = 0,
+  depthTelemetry,
+  onToggleSource,
+}) => {
+  const [internalTelemetry, setInternalTelemetry] = useState<TelemetryData>({
     source: "dummy",
-    depth: 0,
-    depth_cm: 0,
+    depth: fallbackAltitude,
+    depth_cm: fallbackAltitude * 100,
     rate: 0,
     mavlink_connected: false,
   });
 
-  // Fetch data dari Flask setiap 100ms
+  // Jika depthTelemetry tidak dioper dari parent, fetch sendiri dari Flask
   useEffect(() => {
+    if (depthTelemetry) return;
+
     const interval = setInterval(async () => {
       try {
         const response = await fetch("http://localhost:5001/api/telemetry");
         if (!response.ok) return;
 
         const data: TelemetryData = await response.json();
-        setTelemetry(data);
+        setInternalTelemetry(data);
       } catch (error) {
         console.error("Gagal mengambil data telemetri:", error);
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [depthTelemetry]);
 
   // Fungsi untuk mengganti sumber data (Real / Dummy)
-  const toggleSource = async (newSource: "real" | "dummy") => {
+  const handleToggleSource = async (newSource: "real" | "dummy") => {
+    if (onToggleSource) {
+      onToggleSource(newSource);
+      return;
+    }
     try {
       await fetch("http://localhost:5001/api/source", {
         method: "POST",
@@ -53,10 +66,20 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = () => {
     }
   };
 
-  const altitude = telemetry.depth;
-  const pct = Math.min(1, Math.max(0, altitude / 5.0));
-  const isDanger = altitude < 0.3;
-  const isWarning = altitude < 1.5;
+  const telemetry = depthTelemetry
+    ? {
+        source: depthTelemetry.source,
+        depth: depthTelemetry.backendOnline ? depthTelemetry.depth : fallbackAltitude,
+        depth_cm: depthTelemetry.backendOnline ? depthTelemetry.depth_cm : fallbackAltitude * 100,
+        rate: depthTelemetry.rate,
+        mavlink_connected: depthTelemetry.mavlink_connected,
+      }
+    : internalTelemetry;
+
+  const currentAltitude = telemetry.depth;
+  const pct = Math.min(1, Math.max(0, currentAltitude / 5.0));
+  const isDanger = currentAltitude < 0.3;
+  const isWarning = currentAltitude < 1.5;
   const colorVar = isDanger
     ? "var(--red)"
     : isWarning
@@ -99,7 +122,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = () => {
       <div className="alt-readout">
         <div className="alt-label">ALTITUDE</div>
         <div className="alt-value" style={{ color: colorVar }}>
-          {altitude.toFixed(2)}
+          {currentAltitude.toFixed(2)}
         </div>
         <div className="alt-unit">METERS</div>
 
@@ -146,7 +169,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = () => {
         >
           <button
             onClick={() =>
-              toggleSource(telemetry.source === "real" ? "dummy" : "real")
+              handleToggleSource(telemetry.source === "real" ? "dummy" : "real")
             }
             style={{
               padding: "2px 6px",

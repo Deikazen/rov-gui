@@ -29,30 +29,6 @@ def create_mavlink_connection():
         print(
             f'[MAVLINK] Socket UDP terikat pada {MAVLINK_UDP_PORT}. Menunggu'
             ' stream...'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         )
         return link
     except Exception as e:

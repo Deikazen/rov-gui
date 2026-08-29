@@ -21,6 +21,7 @@ export function useSimulation() {
     const [emergencyActive, setEmergencyActive] = useState(false);
     const [theme, setTheme] = useState<'dark' | 'light'>('dark');
     const [connected, setConnected] = useState(true);
+    const [imuOk, setImuOk] = useState(true);
     const [logging, setLogging] = useState(false);
     const [logData, setLogData] = useState<LogSample[]>([]);
 
@@ -117,6 +118,7 @@ export function useSimulation() {
                     console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://localhost:8082)');
                     isWsConnectedRef.current = true;
                     setConnected(true);
+                    setImuOk(true);
                 };
 
                 ws.onmessage = (event) => {
@@ -129,8 +131,11 @@ export function useSimulation() {
                                 pitch: Number(data.pitch) || 0,
                                 yaw: Number(data.yaw) || 0,
                             });
+                            setImuOk(true);
                         } else if (data.type === 'status') {
-                            setConnected(Boolean(data.mavlink_online));
+                            const mavOnline = Boolean(data.mavlink_online);
+                            setConnected(mavOnline);
+                            setImuOk(mavOnline);
                         }
                     } catch (err) {
                         console.error('[WS TELEMETRY] Error parsing message:', err);
@@ -360,6 +365,7 @@ export function useSimulation() {
         emergencyActive,
         theme,
         connected,
+        imuOk,
         logging,
         logData,
         altitude,

@@ -13,6 +13,7 @@ interface CameraPanelProps {
   onSeek: (id: number, percent: number) => void;
   /** URL MJPEG stream dari backend (mis. http://192.168.x.x:9010/video_feed). Kosongkan untuk fallback simulasi. */
   streamUrl?: string;
+  onStatusChange?: (id: number, isOk: boolean) => void;
 }
 
 function formatVideoTime(seconds: number): string {
@@ -30,6 +31,7 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({
   onTogglePlay,
   onSeek,
   streamUrl,
+  onStatusChange,
 }) => {
   const sliderVal = String((cameraState.time / cameraState.duration) * 100);
   const [feedError, setFeedError] = useState(false);
@@ -43,6 +45,15 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({
 
   const hasStreamConfig = Boolean(streamUrl && streamUrl.trim().length > 0);
   const isLive = hasStreamConfig && !feedError;
+
+  // Lapor status kamera ke parent (FooterBar / App)
+  React.useEffect(() => {
+    if (hasStreamConfig) {
+      onStatusChange?.(id, !feedError);
+    } else {
+      onStatusChange?.(id, true); // fallback simulasi OK
+    }
+  }, [hasStreamConfig, feedError, id, onStatusChange]);
 
   // Listen to Global Reset Layout Event
   React.useEffect(() => {
@@ -142,6 +153,7 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({
               className={`cam-feed-live ${isContainFit ? "contain" : "cover"}`}
               src={streamUrl}
               alt={title}
+              onLoad={() => setFeedError(false)}
               onError={() => setFeedError(true)}
               draggable={false}
             />
