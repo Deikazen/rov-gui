@@ -102,12 +102,14 @@ def mavlink_worker():
 
                     # 1. Coba dari GLOBAL_POSITION_INT (relative_alt dalam mm)
                     elif msg_type == 'GLOBAL_POSITION_INT':
+                        print('GLOBAL_POSTITION')
                         depth_m = max(0.0, -(msg.relative_alt / 1000.0))
                         with state_lock:
                             real_data['depth'] = depth_m
 
                     # 2. Coba dari VFR_HUD (climb rate & alt)
                     elif msg_type == 'VFR_HUD':
+                        print('VFR_HUD')
                         rate_ms = -float(msg.climb)
                         with state_lock:
                             real_data['rate'] = rate_ms
@@ -118,6 +120,7 @@ def mavlink_worker():
                     # 3. Alternative: SCALED_PRESSURE (Sensor Bar30 bawaan BlueROV2)
                     elif msg_type == 'SCALED_PRESSURE':
                         # Konversi HPa ke Kedalaman Meter (p_barom / 98.0665)
+                        print('Scaled Pressure')
                         press_diff = max(0.0, msg.press_diff)  # hPa
                         depth_m = press_diff / 98.0665
                         with state_lock:
