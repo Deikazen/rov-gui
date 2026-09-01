@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 export interface DepthTelemetryData {
   source: "real" | "dummy";
@@ -11,6 +11,9 @@ export interface DepthTelemetryData {
 }
 
 export function useDepth(fallbackSimDepth: number = 0) {
+  const fallbackRef = useRef(fallbackSimDepth);
+  fallbackRef.current = fallbackSimDepth;
+
   const [telemetry, setTelemetry] = useState<DepthTelemetryData>({
     source: "dummy",
     depth: fallbackSimDepth,
@@ -23,8 +26,12 @@ export function useDepth(fallbackSimDepth: number = 0) {
 
   useEffect(() => {
     let isMounted = true;
+    let isFetching = false;
 
     const fetchTelemetry = async () => {
+      if (isFetching) return;
+      isFetching = true;
+
       try {
         const response = await fetch("http://localhost:5001/api/telemetry");
         if (!response.ok) {
@@ -51,11 +58,13 @@ export function useDepth(fallbackSimDepth: number = 0) {
         // Backend offline: fallback ke simulasi
         setTelemetry((prev) => ({
           ...prev,
-          depth: fallbackSimDepth,
-          depth_cm: fallbackSimDepth * 100,
+          depth: fallbackRef.current,
+          depth_cm: fallbackRef.current * 100,
           backendOnline: false,
           depthOk: true, // fallback simulasi tetap aktif
         }));
+      } finally {
+        isFetching = false;
       }
     };
 
@@ -66,9 +75,16 @@ export function useDepth(fallbackSimDepth: number = 0) {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [fallbackSimDepth]);
+  }, []);
 
   const toggleSource = useCallback(async (newSource: "real" | "dummy") => {
+    // Optimistic UI update agar tombol langsung berubah seketika saat diklik
+    setTelemetry((prev) => ({
+      ...prev,
+      source: newSource,
+      depthOk: newSource === "real" ? prev.mavlink_connected : true,
+    }));
+
     try {
       await fetch("http://localhost:5001/api/source", {
         method: "POST",

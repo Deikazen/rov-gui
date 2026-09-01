@@ -68,7 +68,7 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
             isFetching = true;
 
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 800);
+            const timeoutId = setTimeout(() => controller.abort(), 1500);
 
             try {
                 const res = await fetch('http://localhost:8007/api/trajectory', {
@@ -102,8 +102,8 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                 clearTimeout(timeoutId);
                 if (isMounted) {
                     failureCount++;
-                    // Hanya tandai OFFLINE jika gagal 3x berturut-turut (~300ms) untuk mencegah flickering
-                    if (failureCount >= 3) {
+                    // Hanya tandai OFFLINE jika gagal 5x berturut-turut untuk mencegah flickering
+                    if (failureCount >= 5) {
                         setIsBackendConnected(false);
                     }
                 }
@@ -164,6 +164,8 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
     // 4. Toggle Sumber Data (REAL Pixhawk / DUMMY Simulation)
     const toggleSource = async () => {
         const nextSource = telemetry.source === 'real' ? 'dummy' : 'real';
+        // Optimistic UI update agar tombol langsung merespons seketika
+        setTelemetry((prev) => ({ ...prev, source: nextSource }));
         try {
             await fetch('http://localhost:8007/api/source', {
                 method: 'POST',

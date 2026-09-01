@@ -42,9 +42,14 @@ LOGIKA ESTIMASI POSISI (X, Y, Z, YAW):
 import time
 import math
 import threading
+import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from pymavlink import mavutil
+
+# Redam log akses HTTP Werkzeug yang berlebihan agar tidak memblokir console I/O
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 # ---------------------------------------------------------------------------
 # Konfigurasi Endpoint MAVLink & Server
@@ -217,11 +222,9 @@ def mavlink_worker():
                                 dt = 0.05  # Default ~20 Hz
 
                             # 1. Baca nilai PWM dari Servo 1, 2, dan 5
-                            # s1 = 1500
-                            # s2 = 1500
-                            s1 = int(getattr(msg, 'servo1_raw'))
-                            s2 = int(getattr(msg, 'servo2_raw'))
-                            s5 = int(getattr(msg, 'servo5_raw'))
+                            s1 = int(getattr(msg, 'servo1_raw', PWM_NEUTRAL))
+                            s2 = int(getattr(msg, 'servo2_raw', PWM_NEUTRAL))
+                            s5 = int(getattr(msg, 'servo5_raw', PWM_NEUTRAL))
 
                             real_data['servo1'] = s1
                             real_data['servo2'] = s2
@@ -265,7 +268,12 @@ def mavlink_worker():
                             real_data['x'] += dx
                             real_data['y'] += dy
 
-                            # 7. Tampilkan log pergerakan ke terminal setiap 0.5 detik
+                            cur_x = real_data['x']
+                            cur_y = real_data['y']
+                            cur_z = real_data['z']
+
+                        # 7. Tampilkan log pergerakan ke terminal setiap 0.5 detik (di luar lock)
+                        if msg_type == 'SERVO_OUTPUT_RAW':
                             now_log = time.time()
                             if now_log - last_log_time >= 0.5:
                                 last_log_time = now_log
@@ -276,7 +284,7 @@ def mavlink_worker():
                                 print(
                                     f"[DEAD RECKONING] S1:{s1} S2:{s2} S5:{s5} | "
                                     f"Surge:{surge_lbl} ({v_surge:+.2f}m/s) Sway:{sway_lbl} ({v_sway:+.2f}m/s) | "
-                                    f"Yaw:{yaw_deg:05.1f}° | POS: (X:{real_data['x']:+.2f}m, Y:{real_data['y']:+.2f}m, Z:{real_data['z']:.2f}m)"
+                                    f"Yaw:{yaw_deg:05.1f}° | POS: (X:{cur_x:+.2f}m, Y:{cur_y:+.2f}m, Z:{cur_z:.2f}m)"
                                 )
 
                 # Deteksi Timeout Komunikasi MAVLink

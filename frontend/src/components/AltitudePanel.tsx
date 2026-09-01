@@ -55,6 +55,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
       onToggleSource(newSource);
       return;
     }
+    setInternalTelemetry((prev) => ({ ...prev, source: newSource }));
     try {
       await fetch("http://localhost:5001/api/source", {
         method: "POST",
