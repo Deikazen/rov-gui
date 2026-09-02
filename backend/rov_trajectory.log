@@ -1,0 +1,25 @@
+2026-08-29 20:07:12,224 [INFO] ======================================================================
+2026-08-29 20:07:12,224 [INFO] SESI BARU DIMULAI (log direset) | HEADING_SOURCE=stick
+2026-08-29 20:07:12,224 [INFO] ======================================================================
+2026-08-29 20:07:12,224 [INFO] Mendengarkan paket UDP di udpin:0.0.0.0:14553 ...
+2026-08-29 20:07:12,226 [INFO] Server Backend aktif pada http://127.0.0.1:8007
+2026-08-29 20:07:12,488 [INFO] Heartbeat autopilot terdeteksi -> Sys ID: 1, Comp ID: 1
+2026-08-29 20:07:13,054 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:13,571 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:14,116 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:14,622 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:15,177 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:15,740 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:16,263 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:16,768 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:17,273 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:17,813 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:18,313 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:18,861 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:19,367 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:19,867 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:20,426 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:20,970 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.6°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:21,510 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.5°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:22,021 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.5°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)
+2026-08-29 20:07:22,565 [INFO] [stick] S1:1500 S2:1500 S5:1500 | Surge:DIAM (+0.00m/s) Sway:DIAM (+0.00m/s) | Heading:000.0° (attitude yaw:116.5°) | POS: (X:+0.00m, Y:+0.00m, Z:0.00m)

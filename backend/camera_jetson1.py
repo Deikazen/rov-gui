@@ -2,21 +2,21 @@
 Camera Proxy — meneruskan MJPEG stream dari unified_rov_server.py (Jetson)
 ke frontend, tanpa frontend perlu tahu IP Jetson secara langsung.
 
-Kenapa perlu ini (bukan langsung <img src="http://jetson-ip:9010/video_feed">):
-  - Frontend / user lain yang buka website TIDAK perlu join ZeroTier network Anda.
-    Cukup backend ini yang punya akses ZeroTier ke Jetson.
-  - Satu titik kontrol: kalau nanti ada 2+ kamera, tinggal tambah endpoint di sini.
-  - Bisa ditambah auth/rate-limit di depan tanpa sentuh kode Jetson.
+REVISI ANTI-LAG:
+  - read timeout eksplisit (dulu None -> bisa nge-hang selamanya kalau upstream diam)
+  - tangkap ReadTimeout supaya browser bisa reconnect otomatis lewat <img> onerror,
+    bukan koneksi menggantung tanpa akhir
 
-Jalankan di komputer yang PUNYA akses ZeroTier ke Jetson (laptop Anda / server GCS,
-sama seperti tempat model_3d.py biasanya dijalankan) — BUKAN di Jetson itu sendiri.
-
-Install dependency:
-    pip install fastapi uvicorn httpx
-
-Jalankan:
-    python3 camera_proxy.py
-    # atau: uvicorn camera_proxy:app --host 0.0.0.0 --port 8090
+TIPS PENTING SOAL IP:
+  Kalau komputer yang menjalankan file ini SATU JARINGAN LOKAL (WiFi/LAN yang sama)
+  dengan Jetson, GANTI JETSON_CAM1_URL di bawah dengan IP LOKAL Jetson
+  (contoh: 192.168.1.xx), BUKAN IP ZeroTier. Ini mengurangi lag karena:
+    1. Tidak ada overhead enkripsi/tunneling ZeroTier.
+    2. ZeroTier kadang RELAY lewat server publik kalau P2P gagal terbentuk
+       (cek dengan `sudo zerotier-cli listpeers` di Jetson - kalau ada baris
+       RELAY bukan DIRECT, itu penyebab lag).
+  ZeroTier tetap perlu dipakai kalau proxy ini dijalankan di luar jaringan
+  lokal Jetson (misal proxy di cloud atau laptop yang beda jaringan).
 """
 
 import httpx
@@ -24,9 +24,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- KONFIGURASI: sesuaikan dengan IP ZeroTier Jetson Anda ---
-JETSON_CAM1_URL = "http://10.37.36.168:9010/video_feed"
+# --- KONFIGURASI ---
+# Kalau proxy ini satu jaringan lokal dengan Jetson, pakai IP LOKAL Jetson,
+# misal: "http://192.168.1.50:9010/video_feed"
+# Kalau beda jaringan (remote), baru pakai IP ZeroTier seperti sebelumnya.
+JETSON_CAM1_URL = "http://10.147.48.168:9010/video_feed"
 # JETSON_CAM2_URL = "http://<ip-jetson-kedua-jika-ada>:9010/video_feed"
+
+# Timeout baca per-chunk. Kalau upstream diam lebih lama dari ini, dianggap
+# stuck dan koneksi ditutup (browser akan reconnect otomatis).
+READ_TIMEOUT_SEC = 15.0
 
 app = FastAPI(title="ROV Camera Proxy")
 
@@ -39,44 +46,28 @@ app.add_middleware(
 )
 
 
-async def relay_mjpeg(source_url: str):
-    """Generator yang streaming byte demi byte dari Jetson ke client, tanpa buffering penuh di memori."""
-    timeout = httpx.Timeout(
-        10.0, read=None)  # read=None -> stream tanpa batas waktu
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        try:
-            async with client.stream("GET", source_url) as upstream:
-                if upstream.status_code != 200:
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"Jetson merespons status {upstream.status_code}",
-                    )
-                content_type = upstream.headers.get(
-                    "content-type", "multipart/x-mixed-replace"
-                )
-                async for chunk in upstream.aiter_bytes():
-                    yield chunk
-        except httpx.ConnectError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Tidak bisa konek ke Jetson di {source_url}: {e}",
-            )
-
-
 @app.get("/api/camera1/stream")
 async def camera1_stream():
-    timeout = httpx.Timeout(10.0, read=None)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        try:
-            upstream = await client.send(
-                client.build_request("GET", JETSON_CAM1_URL), stream=True
-            )
-        except httpx.ConnectError as e:
-            raise HTTPException(
-                status_code=502, detail=f"Tidak bisa konek ke Jetson: {e}"
-            )
+    timeout = httpx.Timeout(10.0, connect=5.0, read=READ_TIMEOUT_SEC)
+    client = httpx.AsyncClient(timeout=timeout)
+    try:
+        upstream = await client.send(
+            client.build_request("GET", JETSON_CAM1_URL), stream=True
+        )
+    except httpx.ConnectError as e:
+        await client.aclose()
+        raise HTTPException(
+            status_code=502, detail=f"Tidak bisa konek ke Jetson di {JETSON_CAM1_URL}: {e}"
+        )
+    except httpx.TimeoutException as e:
+        await client.aclose()
+        raise HTTPException(
+            status_code=504, detail=f"Timeout konek ke Jetson: {e}"
+        )
 
     if upstream.status_code != 200:
+        await upstream.aclose()
+        await client.aclose()
         raise HTTPException(
             status_code=502, detail=f"Jetson merespons status {upstream.status_code}"
         )
@@ -89,15 +80,46 @@ async def camera1_stream():
         try:
             async for chunk in upstream.aiter_bytes():
                 yield chunk
+        except httpx.ReadTimeout:
+            # Upstream (Jetson) berhenti mengirim frame lebih lama dari
+            # READ_TIMEOUT_SEC -> stream dianggap macet, tutup dengan tenang
+            # supaya frontend reconnect, alih-alih koneksi menggantung selamanya.
+            print(
+                "[CAMERA PROXY] Upstream diam terlalu lama (read timeout), "
+                "menutup stream supaya client reconnect."
+            )
+        except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
+            # Koneksi ke Jetson putus di tengah stream (browser reload,
+            # tab ditutup, ZeroTier sempat drop, dsb). Ini NORMAL untuk
+            # proxy MJPEG — cukup hentikan generator dengan tenang,
+            # tanpa melempar traceback yang bikin panik di console.
+            print(
+                "[CAMERA PROXY] Stream terputus (client/upstream disconnect), "
+                "reconnect akan terjadi otomatis dari sisi <img>."
+            )
         finally:
+            # Tutup upstream response + client HANYA setelah frontend
+            # berhenti nonton (browser close / error), supaya tidak
+            # membiarkan koneksi ke Jetson menggantung.
             await upstream.aclose()
+            await client.aclose()
 
-    return StreamingResponse(stream_and_close(), media_type=content_type)
+    return StreamingResponse(
+        stream_and_close(),
+        media_type=content_type,
+        headers={
+            # Cegah browser/proxy di tengah jalan nge-cache atau nge-buffer
+            # frame MJPEG, supaya stream tetap terasa real-time.
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "camera1_proxy", "jetson_cam1_url": JETSON_CAM1_URL}
 
 
 if __name__ == "__main__":
