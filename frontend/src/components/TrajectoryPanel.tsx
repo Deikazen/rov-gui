@@ -56,20 +56,34 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
         }, 2800);
     }, []);
 
-    // 1. Fetch data dari Flask backend (http://localhost:8007/api/trajectory) setiap 50ms (20 Hz)
+    // 1. Fetch data dari Flask backend (http://localhost:8007/api/trajectory) setiap 100ms (10 Hz)
     useEffect(() => {
         let isMounted = true;
+        let isFetching = false;
+        let failureCount = 0;
 
         const fetchTrajectory = async () => {
+            // Cegah request overlap jika request sebelumnya belum selesai
+            if (isFetching) return;
+            isFetching = true;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1500);
+
             try {
-                const res = await fetch('http://localhost:8007/api/trajectory');
+                const res = await fetch('http://localhost:8007/api/trajectory', {
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+
                 if (!res.ok) {
-                    if (isMounted) setIsBackendConnected(false);
-                    return;
+                    throw new Error(`HTTP error! status: ${res.status}`);
                 }
+
                 const data: TrajectoryTelemetry = await res.json();
                 if (!isMounted) return;
 
+                failureCount = 0;
                 setIsBackendConnected(true);
                 setTelemetry(data);
 
@@ -85,11 +99,20 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                     return prev;
                 });
             } catch {
-                if (isMounted) setIsBackendConnected(false);
+                clearTimeout(timeoutId);
+                if (isMounted) {
+                    failureCount++;
+                    // Hanya tandai OFFLINE jika gagal 5x berturut-turut untuk mencegah flickering
+                    if (failureCount >= 5) {
+                        setIsBackendConnected(false);
+                    }
+                }
+            } finally {
+                isFetching = false;
             }
         };
 
-        const interval = setInterval(fetchTrajectory, 50);
+        const interval = setInterval(fetchTrajectory, 100);
         return () => {
             isMounted = false;
             clearInterval(interval);
@@ -141,6 +164,8 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
     // 4. Toggle Sumber Data (REAL Pixhawk / DUMMY Simulation)
     const toggleSource = async () => {
         const nextSource = telemetry.source === 'real' ? 'dummy' : 'real';
+        // Optimistic UI update agar tombol langsung merespons seketika
+        setTelemetry((prev) => ({ ...prev, source: nextSource }));
         try {
             await fetch('http://localhost:8007/api/source', {
                 method: 'POST',
@@ -159,25 +184,35 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
         showToast('🗑 Jejak Trajectory Dibersihkan');
     };
 
-    // 6. Penanganan Resize Canvas
+    // 6. Penanganan Resize Canvas (Fix canvas feedback loop)
     const resizeCanvas = useCallback(() => {
         const cvs = canvasRef.current;
         if (!cvs || !cvs.parentElement) return;
         const rect = cvs.parentElement.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        cvs.width = rect.width * dpr;
-        cvs.height = rect.height * dpr;
-        cvs.style.width = `${rect.width}px`;
-        cvs.style.height = `${rect.height}px`;
+        const w = Math.floor(rect.width);
+        const h = Math.floor(rect.height);
+        if (w > 0 && h > 0) {
+            cvs.width = w * dpr;
+            cvs.height = h * dpr;
+        }
     }, []);
 
     useEffect(() => {
         resizeCanvas();
+        const handleGlobalReset = () => {
+            setZoomScale(45);
+            setPanOffset({ x: 0, y: 0 });
+            setAutoCenter(true);
+            resizeCanvas();
+        };
         window.addEventListener('resize', resizeCanvas);
         window.addEventListener('rov-layout-change', resizeCanvas);
+        window.addEventListener('rov-reset-layout', handleGlobalReset);
         return () => {
             window.removeEventListener('resize', resizeCanvas);
             window.removeEventListener('rov-layout-change', resizeCanvas);
+            window.removeEventListener('rov-reset-layout', handleGlobalReset);
         };
     }, [resizeCanvas]);
 

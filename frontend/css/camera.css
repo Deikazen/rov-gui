@@ -1,46 +1,160 @@
 /* ── CAMERA PANELS STYLES ── */
 .cam-panel .panel-body {
-    background: #000;
+    background: #030712;
+    position: relative;
+    overflow: hidden;
+    display: flex;
 }
 
 body.light-theme .cam-panel .panel-body {
-    background: #dce7f1;
+    background: #0b1329;
 }
 
+/* Container Wrapper untuk Feed Video & Overlay */
+.cam-feed-wrap {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cam-feed-wrap.is-zoomed {
+    cursor: grab;
+}
+
+.cam-feed-wrap.is-dragging {
+    cursor: grabbing !important;
+    user-select: none;
+}
+
+/* Transformable Media Layer (Zoom & Pan) */
+.cam-feed-media {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: transform;
+}
+
+/* Live Video MJPEG Stream */
+.cam-feed-live {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-position: center;
+    display: block;
+    z-index: 1;
+}
+
+.cam-feed-live.cover {
+    object-fit: cover;
+}
+
+.cam-feed-live.contain {
+    object-fit: contain;
+    background: #000;
+}
+
+/* Background Feed Simulasi Fallback */
 .cam-feed-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.cam-feed-bg.pool-1 {
+    background-image: url('/kolam1.png');
+}
+
+.cam-feed-bg.pool-2 {
+    background-image: url('/kolam2.png');
+}
+
+/* CRT Tactical Scanlines & Corner Vignette */
+.cam-scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background:
+        linear-gradient(rgba(0, 170, 255, 0.03) 50%, rgba(0, 0, 0, 0.05) 50%),
+        radial-gradient(circle at center, transparent 0 45%, rgba(0, 0, 0, 0.35) 100%);
+    background-size: 100% 4px, 100% 100%;
+}
+
+/* Corner HUD Brackets */
+.cam-corner-brackets {
+    position: absolute;
+    inset: 8px;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.cam-corner-brackets .bracket {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: rgba(0, 170, 255, 0.35);
+}
+
+.cam-corner-brackets .bracket.tl {
+    top: 0;
+    left: 0;
+    border-top: 1.5px solid;
+    border-left: 1.5px solid;
+}
+
+.cam-corner-brackets .bracket.tr {
+    top: 0;
+    right: 0;
+    border-top: 1.5px solid;
+    border-right: 1.5px solid;
+}
+
+.cam-corner-brackets .bracket.bl {
+    bottom: 0;
+    left: 0;
+    border-bottom: 1.5px solid;
+    border-left: 1.5px solid;
+}
+
+.cam-corner-brackets .bracket.br {
+    bottom: 0;
+    right: 0;
+    border-bottom: 1.5px solid;
+    border-right: 1.5px solid;
+}
+
+/* Tactical Aiming Reticle & Crosshair */
+.cam-reticle-wrap {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-position: center;
-    background-size: cover;
-    background-repeat: no-repeat;
-}
-
-.cam-feed-bg::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-        linear-gradient(rgba(0, 170, 255, 0.04) 50%, rgba(0, 0, 0, 0.04) 50%),
-        radial-gradient(circle at center, transparent 0 42%, rgba(0, 0, 0, 0.24) 100%);
-    background-size: 100% 4px, 100% 100%;
     pointer-events: none;
-}
-
-.cam-feed-bg.pool-1 {
-    background-image: url('../kolam1.png');
-}
-
-.cam-feed-bg.pool-2 {
-    background-image: url('../kolam2.png');
+    z-index: 3;
 }
 
 .cam-reticle {
-    width: 50px;
-    height: 50px;
-    border: 1px dashed rgba(0, 170, 255, 0.25);
+    width: 52px;
+    height: 52px;
+    border: 1px dashed rgba(0, 170, 255, 0.3);
     border-radius: 50%;
     position: relative;
 }
@@ -50,7 +164,7 @@ body.light-theme .cam-panel .panel-body {
     width: 100%;
     height: 1px;
     top: 50%;
-    background: rgba(0, 170, 255, 0.15);
+    background: rgba(0, 170, 255, 0.2);
 }
 
 .cam-crosshair-v {
@@ -58,28 +172,230 @@ body.light-theme .cam-panel .panel-body {
     height: 100%;
     width: 1px;
     left: 50%;
+    background: rgba(0, 170, 255, 0.2);
+}
+
+.cam-reticle-dot {
+    position: absolute;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgba(0, 170, 255, 0.6);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* ── TOP HUD (Timestamp & Status Badges) ── */
+.cam-top-hud {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.cam-timestamp {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--amber);
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(4px);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    pointer-events: auto;
+}
+
+body.light-theme .cam-timestamp {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
+    color: #92400e;
+}
+
+.cam-top-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+}
+
+/* Zoom Toolbar Controls */
+.cam-zoom-controls {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(3, 7, 18, 0.75);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(0, 170, 255, 0.3);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+body.light-theme .cam-zoom-controls {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
+}
+
+.cam-zoom-btn {
+    width: 18px;
+    height: 18px;
+    background: transparent;
+    border: none;
+    color: var(--blue);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cam-zoom-btn:hover:not(:disabled) {
+    background: rgba(0, 170, 255, 0.25);
+    color: #ffffff;
+}
+
+.cam-zoom-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.cam-zoom-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--blue);
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid rgba(0, 170, 255, 0.2);
+    border-right: 1px solid rgba(0, 170, 255, 0.2);
+    cursor: pointer;
+    line-height: 18px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cam-zoom-badge:hover,
+.cam-zoom-badge.active {
+    background: rgba(0, 170, 255, 0.25);
+    color: #38bdf8;
+}
+
+.cam-zoom-reset-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--amber);
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    backdrop-filter: blur(4px);
+}
+
+.cam-zoom-reset-btn:hover {
+    background: rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+body.light-theme .cam-zoom-reset-btn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.5);
+}
+
+.cam-fit-toggle-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.cam-fit-toggle-btn:hover {
+    color: var(--blue);
+    border-color: var(--blue);
     background: rgba(0, 170, 255, 0.15);
 }
 
-.cam-label-overlay {
-    position: absolute;
-    bottom: 10px;
-    left: 14px;
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--green);
+body.light-theme .cam-fit-toggle-btn {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
 }
 
-.cam-rec {
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    display: flex;
+.cam-badge-live {
+    display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
-    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--green);
+    background: rgba(16, 185, 129, 0.18);
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    padding: 2px 7px;
+    border-radius: 4px;
+    backdrop-filter: blur(4px);
+}
+
+.cam-live-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: blink 1.5s ease infinite;
+}
+
+.cam-badge-sim {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--amber);
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    padding: 2px 7px;
+    border-radius: 4px;
+    backdrop-filter: blur(4px);
+}
+
+.cam-sim-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--amber);
+}
+
+.cam-badge-rec {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
     color: var(--red);
+    background: rgba(244, 63, 94, 0.18);
+    border: 1px solid rgba(244, 63, 94, 0.45);
+    padding: 2px 7px;
+    border-radius: 4px;
+    backdrop-filter: blur(4px);
 }
 
 .cam-rec-dot {
@@ -87,62 +403,163 @@ body.light-theme .cam-panel .panel-body {
     height: 5px;
     border-radius: 50%;
     background: var(--red);
+    box-shadow: 0 0 6px var(--red);
     animation: blink 1s linear infinite;
 }
 
-.cam-timestamp {
+/* ── BOTTOM HUD (Label & Controls) ── */
+.cam-bottom-hud {
     position: absolute;
-    top: 10px;
-    left: 14px;
-    font-family: 'JetBrains Mono', monospace;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.cam-label-overlay {
     font-size: 10px;
-    color: var(--amber);
+    font-weight: 600;
+    color: var(--blue);
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(4px);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 170, 255, 0.25);
+    pointer-events: auto;
+    white-space: nowrap;
+}
+
+body.light-theme .cam-label-overlay {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.3);
+    color: #0369a1;
+}
+
+.cam-bottom-controls {
+    display: flex;
+    align-items: center;
+    pointer-events: auto;
+}
+
+.cam-live-telemetry {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    padding: 3px 8px;
+}
+
+body.light-theme .cam-live-telemetry {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
+}
+
+.cam-live-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--blue);
+    letter-spacing: 0.5px;
 }
 
 .cam-timeline {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 30px;
-    display: grid;
-    grid-template-columns: auto 1fr auto;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border: 1px solid rgba(0, 170, 255, 0.18);
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.38);
-    backdrop-filter: blur(3px);
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid rgba(0, 170, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(3, 7, 18, 0.75);
+    backdrop-filter: blur(4px);
 }
 
 body.light-theme .cam-timeline {
-    background: rgba(255, 255, 255, 0.72);
-    border-color: rgba(0, 119, 182, 0.24);
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(0, 119, 182, 0.25);
 }
 
 .cam-play-btn {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     border: 1px solid rgba(0, 170, 255, 0.42);
-    background: rgba(0, 170, 255, 0.12);
+    background: rgba(0, 170, 255, 0.15);
     color: var(--blue);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.cam-play-btn:hover {
+    background: rgba(0, 170, 255, 0.3);
 }
 
 .cam-slider {
-    width: 100%;
+    width: 65px;
     accent-color: var(--blue);
     cursor: pointer;
 }
 
 .cam-timecode {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 9px;
     color: var(--text-main);
-    min-width: 72px;
+    min-width: 64px;
     text-align: right;
 }
+
+/* Offline Banner Overlay */
+.cam-offline-banner {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(3, 7, 18, 0.75);
+    backdrop-filter: blur(3px);
+    gap: 8px;
+    color: #f8fafc;
+    text-align: center;
+    padding: 12px;
+}
+
+.cam-offline-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--red);
+    letter-spacing: 0.5px;
+}
+
+.cam-retry-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--blue);
+    background: rgba(0, 170, 255, 0.2);
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cam-retry-btn:hover {
+    background: rgba(0, 170, 255, 0.4);
+    box-shadow: 0 0 10px rgba(0, 170, 255, 0.35);
+}
+

@@ -4,10 +4,14 @@ interface FooterBarProps {
     mode: 'MANUAL' | 'AUTONOMOUS';
     emergencyActive: boolean;
     connected: boolean;
+    depthOk?: boolean;
+    imuOk?: boolean;
+    camOk?: boolean;
     logging: boolean;
     hasLogData: boolean;
     theme: 'dark' | 'light';
     depth: number;
+    onResetLayout?: () => void;
     onToggleMode: () => void;
     onToggleEmergency: () => void;
     onToggleLogging: () => void;
@@ -20,10 +24,14 @@ export const FooterBar: React.FC<FooterBarProps> = ({
     mode,
     emergencyActive,
     connected,
+    depthOk = true,
+    imuOk = true,
+    camOk = true,
     logging,
     hasLogData,
     theme,
     depth,
+    onResetLayout,
     onToggleMode,
     onToggleEmergency,
     onToggleLogging,
@@ -76,14 +84,23 @@ export const FooterBar: React.FC<FooterBarProps> = ({
 
             <div className="footer-item">
                 <span className="footer-label">SENSORS</span>
-                <div className={`sensor-badge ${connected ? 'sensor-ok' : 'sensor-err'}`}>
-                    {connected ? 'DEPTH OK' : 'DEPTH ERR'}
+                <div
+                    className={`sensor-badge ${depthOk ? 'sensor-ok' : 'sensor-err'}`}
+                    title={`Depth Sensor: ${depthOk ? 'Operational' : 'Disconnected / Error'}`}
+                >
+                    {depthOk ? 'DEPTH OK' : 'DEPTH ERR'}
                 </div>
-                <div className={`sensor-badge ${connected ? 'sensor-ok' : 'sensor-err'}`}>
-                    {connected ? 'IMU OK' : 'IMU ERR'}
+                <div
+                    className={`sensor-badge ${imuOk ? 'sensor-ok' : 'sensor-err'}`}
+                    title={`IMU / Attitude Telemetry: ${imuOk ? 'Operational' : 'Disconnected / Error'}`}
+                >
+                    {imuOk ? 'IMU OK' : 'IMU ERR'}
                 </div>
-                <div className={`sensor-badge ${connected ? 'sensor-ok' : 'sensor-err'}`}>
-                    {connected ? 'CAM OK' : 'CAM ERR'}
+                <div
+                    className={`sensor-badge ${camOk ? 'sensor-ok' : 'sensor-err'}`}
+                    title={`Camera Streams: ${camOk ? 'Operational' : 'Offline / Error'}`}
+                >
+                    {camOk ? 'CAM OK' : 'CAM ERR'}
                 </div>
             </div>
 
@@ -109,6 +126,13 @@ export const FooterBar: React.FC<FooterBarProps> = ({
             <div className="footer-divider" />
 
             <div className="footer-item" style={{ marginLeft: 'auto' }}>
+                <button
+                    className="action-btn"
+                    onClick={onResetLayout}
+                    title="Reset semua ukuran card tampilan dan zoom kamera ke setelan awal"
+                >
+                    ↺ Reset Layout
+                </button>
                 <button className="action-btn theme-toggle" id="btn-theme" onClick={onToggleTheme}>
                     {theme === 'light' ? 'Dark' : 'Light'}
                 </button>

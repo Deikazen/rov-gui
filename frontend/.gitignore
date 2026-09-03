@@ -27,3 +27,5 @@ dist-ssr
 frontend/public/models/TURTARA2.stl
 frontend/public/models/TURTARA.stl*.stl
 *.STL
+
+.env

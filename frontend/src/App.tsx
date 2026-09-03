@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSimulation } from "./hooks/useSimulation";
-import { useQrDetector } from "./hooks/useQrDetector"; // <-- BARU: data QR real-time dari qr_proxy.py
+import { useDepth } from "./hooks/useDepth";
+import { useQrDetector } from "./hooks/useQrDetector"; // <-- data QR real-time dari qr_proxy.py
 import { Header } from "./components/Header";
 import { CameraPanel } from "./components/CameraPanel";
 import { QrPanel } from "./components/QrPanel";
@@ -24,6 +25,7 @@ export function App() {
     emergencyActive,
     theme,
     connected,
+    imuOk,
     logging,
     logData,
     altitude,
@@ -45,6 +47,28 @@ export function App() {
     replayTrajectory,
     clearPath,
   } = useSimulation();
+
+  // Telemetri Depth tersinkronisasi (Flask port 5001 / fallback simulasi)
+  const depthTelemetry = useDepth(altitude);
+  const currentDepth = depthTelemetry.backendOnline ? depthTelemetry.depth : altitude;
+  const depthOk = depthTelemetry.depthOk;
+
+  // Status Kamera Real-time (Cam 1 & Cam 2)
+  const [camStatus, setCamStatus] = useState<Record<number, boolean>>({
+    1: true,
+    2: true,
+  });
+
+  const handleCamStatusChange = useCallback((id: number, ok: boolean) => {
+    setCamStatus((prev) => {
+      if (prev[id] === ok) return prev;
+      return { ...prev, [id]: ok };
+    });
+  }, []);
+
+  const cam1Configured = Boolean(CAM1_URL && CAM1_URL.trim().length > 0);
+  const cam2Configured = Boolean(CAM2_URL && CAM2_URL.trim().length > 0);
+  const camOk = (!cam1Configured || camStatus[1]) && (!cam2Configured || camStatus[2]);
 
   // Data QR real-time: connect ke qr_proxy.py (ws://.../ws/qr/status),
   // otomatis update begitu Camera 01 di Jetson mendeteksi QR code.
@@ -139,9 +163,18 @@ export function App() {
     toggleLogging();
   };
 
+  const handleResetLayout = () => {
+    window.dispatchEvent(new Event("rov-reset-layout"));
+    window.dispatchEvent(new Event("rov-layout-change"));
+  };
+
   return (
     <>
-      <Header timeString={timeString} dateString={dateString} />
+      <Header
+        timeString={timeString}
+        dateString={dateString}
+        onResetLayout={handleResetLayout}
+      />
 
       <div id="main-content">
         <div className="row">
@@ -155,6 +188,7 @@ export function App() {
             onTogglePlay={toggleCameraPlay}
             onSeek={seekCamera}
             streamUrl={CAM1_URL}
+            onStatusChange={handleCamStatusChange}
           />
           <CameraPanel
             id={2}
@@ -166,12 +200,18 @@ export function App() {
             onTogglePlay={toggleCameraPlay}
             onSeek={seekCamera}
             streamUrl={CAM2_URL}
+            onStatusChange={handleCamStatusChange}
           />
           <QrPanel side={qrSide} scanCount={qrScanCount} confidence={qrConf} history={qrHistory} />
         </div>
 
         <div className="row">
-          <AltitudePanel altitude={altitude} altPrev={altPrev} />
+          <AltitudePanel
+            altitude={altitude}
+            altPrev={altPrev}
+            depthTelemetry={depthTelemetry}
+            onToggleSource={depthTelemetry.toggleSource}
+          />
           <TrajectoryPanel
             rovPos={rovPos}
             recordedPath={recordedPath}
@@ -190,10 +230,14 @@ export function App() {
         mode={mode}
         emergencyActive={emergencyActive}
         connected={connected}
+        depthOk={depthOk}
+        imuOk={imuOk}
+        camOk={camOk}
         logging={logging}
         hasLogData={logData.length > 0}
         theme={theme}
-        depth={altitude}
+        depth={currentDepth}
+        onResetLayout={handleResetLayout}
         onToggleMode={toggleMode}
         onToggleEmergency={toggleEmergency}
         onToggleLogging={handleToggleLogging}
