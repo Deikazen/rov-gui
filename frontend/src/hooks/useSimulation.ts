@@ -57,6 +57,7 @@ export function useSimulation() {
     const alarmActiveRef = useRef(false);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const isWsConnectedRef = useRef(false);
+    const hasTrajectoryYawRef = useRef(false);
 
     // Audio Alert function
     const playBeep = useCallback(() => {
@@ -105,17 +106,17 @@ export function useSimulation() {
 
     // Realtime Telemetry WebSocket connection to backend (model_3d.py)
     useEffect(() => {
+        let isComponentMounted = true;
         let ws: WebSocket | null = null;
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-        let isComponentMounted = true;
 
         const connectWS = () => {
             try {
-                ws = new WebSocket('ws://localhost:8082');
+                ws = new WebSocket('ws://127.0.0.1:8082');
 
                 ws.onopen = () => {
                     if (!isComponentMounted) return;
-                    console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://localhost:8082)');
+                    console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://127.0.0.1:8082)');
                     isWsConnectedRef.current = true;
                     setConnected(true);
                     setImuOk(true);
@@ -162,8 +163,38 @@ export function useSimulation() {
 
         connectWS();
 
+        // Fallback sinkronisasi Yaw dari backend port 8007 jika WS 8082 offline
+        let isPollingYaw = false;
+        const pollTrajectoryYaw = setInterval(async () => {
+            if (isWsConnectedRef.current || !isComponentMounted || isPollingYaw) return;
+            isPollingYaw = true;
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 800);
+                const res = await fetch('http://127.0.0.1:8007/api/trajectory', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.yaw !== undefined && isComponentMounted) {
+                        hasTrajectoryYawRef.current = true;
+                        setImu(prev => ({
+                            ...prev,
+                            yaw: Number(data.yaw) || 0
+                        }));
+                        setImuOk(Boolean(data.mavlink_connected));
+                        setConnected(Boolean(data.mavlink_connected));
+                    }
+                }
+            } catch {
+                hasTrajectoryYawRef.current = false;
+            } finally {
+                isPollingYaw = false;
+            }
+        }, 150);
+
         return () => {
             isComponentMounted = false;
+            clearInterval(pollTrajectoryYaw);
             if (reconnectTimer) clearTimeout(reconnectTimer);
             if (ws) {
                 ws.onclose = null;
@@ -241,15 +272,22 @@ export function useSimulation() {
 
             // 5. IMU calculation (Only fallback to simulation if WebSocket backend is offline)
             if (!isWsConnectedRef.current) {
-                const yawTarget = (Math.sin(simTimeRef.current / 4000) * 45 + 180) % 360;
                 const rollTarget = Math.sin(simTimeRef.current / 1500) * 4;
                 const pitchTarget = Math.cos(simTimeRef.current / 1700) * 3;
 
-                setImu(prev => ({
-                    roll: prev.roll + (rollTarget - prev.roll) * 0.05,
-                    pitch: prev.pitch + (pitchTarget - prev.pitch) * 0.05,
-                    yaw: (prev.yaw + ((yawTarget - prev.yaw + 540) % 360 - 180) * 0.02 + 360) % 360
-                }));
+                setImu(prev => {
+                    const newRoll = prev.roll + (rollTarget - prev.roll) * 0.05;
+                    const newPitch = prev.pitch + (pitchTarget - prev.pitch) * 0.05;
+                    if (hasTrajectoryYawRef.current) {
+                        return { ...prev, roll: newRoll, pitch: newPitch };
+                    }
+                    const yawTarget = (Math.sin(simTimeRef.current / 4000) * 45 + 180) % 360;
+                    return {
+                        roll: newRoll,
+                        pitch: newPitch,
+                        yaw: (prev.yaw + ((yawTarget - prev.yaw + 540) % 360 - 180) * 0.02 + 360) % 360,
+                    };
+                });
             }
 
             // 6. Camera replays

@@ -39,10 +39,12 @@ LOGIKA ESTIMASI POSISI (X, Y, Z, YAW):
 ================================================================================
 """
 
-import time
+import json
+import logging
 import math
 import threading
-import logging
+import time
+import urllib.request
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from pymavlink import mavutil
@@ -52,9 +54,10 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # ---------------------------------------------------------------------------
-# Konfigurasi Endpoint MAVLink & Server
+# Konfigurasi Endpoint MAVLink, Ultrasonic & Server
 # ---------------------------------------------------------------------------
 MAVLINK_UDP_ENDPOINT = 'udpin:0.0.0.0:14553'
+ULTRASONIC_ENDPOINT = 'http://127.0.0.1:8008/api/trajectory'
 HEARTBEAT_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 3.0
 HTTP_PORT = 8007
@@ -86,6 +89,9 @@ real_data = {
     'z': 0.0,
     'yaw': 0.0,
     'mavlink_connected': False,
+    'ultrasonic_connected': False,
+    'sensor_1': None,
+    'sensor_2': None,
     'servo1': 1500,
     'servo2': 1500,
     'servo5': 1500,
@@ -121,6 +127,63 @@ def apply_deadband(val, neutral=PWM_NEUTRAL, deadband=PWM_DEADBAND):
     if abs(diff) <= deadband:
         return 0.0
     return float(diff)
+
+
+# ---------------------------------------------------------------------------
+# Ultrasonic Background Worker Thread (Sinkronisasi X, Y dari port 8008)
+# ---------------------------------------------------------------------------
+def ultrasonic_client_worker():
+    """
+    Sinkronisasi instan data posisi (X, Y) dari backend rov_ultrasonic.py (port 8008).
+    Menggunakan interval polling cepat (30ms) dan update independen agar posisi
+    langsung ter-update seketika data sensor masuk.
+    """
+    last_log_state = False
+    last_valid_time = 0.0
+
+    while True:
+        try:
+            req = urllib.request.Request(
+                ULTRASONIC_ENDPOINT,
+                headers={'User-Agent': 'ROV-Trajectory-Bridge'}
+            )
+            with urllib.request.urlopen(req, timeout=0.3) as resp:
+                if resp.status == 200:
+                    u_data = json.loads(resp.read().decode())
+                    is_u_ok = u_data.get('ultrasonic_connected', False)
+                    raw_x = u_data.get('raw_x')
+                    raw_y = u_data.get('raw_y')
+
+                    with state_lock:
+                        if is_u_ok:
+                            last_valid_time = time.time()
+                            real_data['ultrasonic_connected'] = True
+
+                            # Update X dan Y SECARA INDEPENDEN DAN INSTAN!
+                            if raw_x is not None:
+                                real_data['x'] = raw_x
+                            if raw_y is not None:
+                                real_data['y'] = raw_y
+
+                            real_data['sensor_1'] = u_data.get('sensor_1')
+                            real_data['sensor_2'] = u_data.get('sensor_2')
+
+                            if not last_log_state:
+                                print(
+                                    f"[ULTRASONIC BRIDGE] Terhubung ke {ULTRASONIC_ENDPOINT}! Posisi X & Y real-time aktif.")
+                                last_log_state = True
+                        else:
+                            if time.time() - last_valid_time > 2.0:
+                                real_data['ultrasonic_connected'] = False
+        except Exception:
+            with state_lock:
+                if time.time() - last_valid_time > 2.0:
+                    if last_log_state:
+                        print(
+                            "[ULTRASONIC BRIDGE] Koneksi ultrasonic terputus. Fallback ke Dead Reckoning MAVLink.")
+                        last_log_state = False
+                    real_data['ultrasonic_connected'] = False
+        time.sleep(0.03)  # 30ms (~33 Hz) respon instan tanpa lag
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +327,10 @@ def mavlink_worker():
                             dy = (v_surge * math.cos(yaw_rad) -
                                   v_sway * math.sin(yaw_rad)) * dt
 
-                            # 6. Akumulasi pergeseran posisi X dan Y
-                            real_data['x'] += dx
-                            real_data['y'] += dy
+                            # 6. Akumulasi pergeseran posisi X dan Y (hanya jika sensor ultrasonic tidak aktif)
+                            if not real_data.get('ultrasonic_connected'):
+                                real_data['x'] += dx
+                                real_data['y'] += dy
 
                             cur_x = real_data['x']
                             cur_y = real_data['y']
@@ -378,6 +442,9 @@ def get_telemetry():
             'origin_z': round(origin['z'], 3),
             'yaw': round(yaw, 1),
             'mavlink_connected': connected,
+            'ultrasonic_connected': real_data.get('ultrasonic_connected', False),
+            'sensor_1': real_data.get('sensor_1'),
+            'sensor_2': real_data.get('sensor_2'),
             'servo1': s1,
             'servo2': s2,
             'servo5': s5,
@@ -450,8 +517,11 @@ def set_source():
 if __name__ == '__main__':
     mav_thread = threading.Thread(target=mavlink_worker, daemon=True)
     dummy_thread = threading.Thread(target=dummy_worker, daemon=True)
+    ultrasonic_thread = threading.Thread(
+        target=ultrasonic_client_worker, daemon=True)
     mav_thread.start()
     dummy_thread.start()
+    ultrasonic_thread.start()
 
     print(
         f"[ROV TRAJECTORY] Server Backend aktif pada http://127.0.0.1:{HTTP_PORT}")
