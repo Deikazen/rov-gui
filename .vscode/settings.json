@@ -1,0 +1,9 @@
+
+{
+    "pylint.args": [
+        "--disable=C0116,C0103,C0301,W0718,W0613"
+    ],
+    "[python]": {
+        "editor.formatOnSave": false
+    }
+}
