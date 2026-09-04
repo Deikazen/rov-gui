@@ -28,7 +28,7 @@ export interface Point2D {
 }
 
 export interface TrajectoryTelemetry {
-    source: 'real' | 'dummy';
+    source: 'real' | 'dummy' | 'ultrasonic';
     x: number;
     y: number;
     z: number;
@@ -40,4 +40,21 @@ export interface TrajectoryTelemetry {
     origin_z: number;
     yaw: number;
     mavlink_connected: boolean;
+    ultrasonic_connected?: boolean;
+    sensor_1?: {
+        distance_cm: number | null;
+        distance_mm: number | null;
+        status: string;
+        target_axis?: string;
+    } | null;
+    sensor_2?: {
+        distance_cm: number | null;
+        distance_mm: number | null;
+        status: string;
+        target_axis?: string;
+    } | null;
+    pool_size?: {
+        width: number;
+        height: number;
+    };
 }

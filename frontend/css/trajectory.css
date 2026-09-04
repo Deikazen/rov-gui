@@ -123,6 +123,18 @@ body.light-theme .traj-hud-overlay {
     color: var(--text-muted);
 }
 
+.status-pill.ultrasonic-ok {
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+}
+
+.status-pill.ultrasonic-off {
+    background: rgba(100, 116, 139, 0.15);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    color: var(--text-muted);
+}
+
 /* ── MAP CONTROLS TOOLBAR KANAN BAWAH ── */
 .traj-map-controls {
     position: absolute;

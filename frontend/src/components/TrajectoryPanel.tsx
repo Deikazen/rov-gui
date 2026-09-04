@@ -71,9 +71,17 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
             const timeoutId = setTimeout(() => controller.abort(), 1500);
 
             try {
-                const res = await fetch('http://localhost:8007/api/trajectory', {
-                    signal: controller.signal,
-                });
+                let res: Response;
+                try {
+                    res = await fetch('http://localhost:8007/api/trajectory', {
+                        signal: controller.signal,
+                    });
+                    if (!res.ok) throw new Error();
+                } catch {
+                    res = await fetch('http://localhost:8008/api/trajectory', {
+                        signal: controller.signal,
+                    });
+                }
                 clearTimeout(timeoutId);
 
                 if (!res.ok) {
@@ -91,8 +99,8 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                 setLivePath((prev) => {
                     const last = prev[prev.length - 1];
                     const currentPt = { x: data.x, y: data.y };
-                    // Catat titik jika bergerak lebih dari 3cm
-                    if (!last || Math.hypot(data.x - last.x, data.y - last.y) > 0.03) {
+                    // Catat titik jika bergerak minimal 1cm (0.01m)
+                    if (!last || Math.hypot(data.x - last.x, data.y - last.y) >= 0.01) {
                         const updated = [...prev, currentPt];
                         return updated.length > 1200 ? updated.slice(updated.length - 1200) : updated;
                     }
@@ -112,7 +120,7 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
             }
         };
 
-        const interval = setInterval(fetchTrajectory, 100);
+        const interval = setInterval(fetchTrajectory, 50);
         return () => {
             isMounted = false;
             clearInterval(interval);
@@ -579,12 +587,32 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                         <span className="hud-label">HEADING:</span>
                         <span className="hud-val hud-hdg">{telemetry.yaw.toFixed(1)}°</span>
                     </div>
+                    {/* Nilai Sensor Ultrasonic S1 (-> Y) & S2 (-> X) */}
+                    {telemetry.ultrasonic_connected && (
+                        <>
+                            <div className="traj-hud-item">
+                                <span className="hud-label">S1 (Y):</span>
+                                <span className="hud-val" style={{ color: '#38bdf8' }}>
+                                    {telemetry.sensor_1?.distance_cm != null ? `${telemetry.sensor_1.distance_cm.toFixed(1)} cm` : 'Out of range'}
+                                </span>
+                            </div>
+                            <div className="traj-hud-item">
+                                <span className="hud-label">S2 (X):</span>
+                                <span className="hud-val" style={{ color: '#38bdf8' }}>
+                                    {telemetry.sensor_2?.distance_cm != null ? `${telemetry.sensor_2.distance_cm.toFixed(1)} cm` : 'Out of range'}
+                                </span>
+                            </div>
+                        </>
+                    )}
                 </div>
 
-                {/* HUD Kanan Atas: Status Koneksi MAVLink & Port 8007 */}
+                {/* HUD Kanan Atas: Status Koneksi MAVLink, Ultrasonic & API */}
                 <div className="traj-status-overlay">
                     <div className={`status-pill ${isBackendConnected ? 'connected' : 'disconnected'}`}>
-                        {isBackendConnected ? '● API 8007 OK' : '○ API OFFLINE'}
+                        {isBackendConnected ? '● API OK' : '○ API OFFLINE'}
+                    </div>
+                    <div className={`status-pill ${telemetry.ultrasonic_connected ? 'ultrasonic-ok' : 'ultrasonic-off'}`}>
+                        {telemetry.ultrasonic_connected ? '● Ultrasonic 5x5m' : '○ No Ultrasonic'}
                     </div>
                     <div className={`status-pill ${telemetry.mavlink_connected ? 'mavlink-ok' : 'mavlink-off'}`}>
                         {telemetry.mavlink_connected ? '● MAVLink OK' : '○ No MAVLink'}
