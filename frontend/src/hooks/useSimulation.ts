@@ -112,11 +112,11 @@ export function useSimulation() {
 
         const connectWS = () => {
             try {
-                ws = new WebSocket('ws://localhost:8082');
+                ws = new WebSocket('ws://127.0.0.1:8082');
 
                 ws.onopen = () => {
                     if (!isComponentMounted) return;
-                    console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://localhost:8082)');
+                    console.log('[WS TELEMETRY] Terhubung ke server model_3d.py (ws://127.0.0.1:8082)');
                     isWsConnectedRef.current = true;
                     setConnected(true);
                     setImuOk(true);
@@ -164,10 +164,15 @@ export function useSimulation() {
         connectWS();
 
         // Fallback sinkronisasi Yaw dari backend port 8007 jika WS 8082 offline
+        let isPollingYaw = false;
         const pollTrajectoryYaw = setInterval(async () => {
-            if (isWsConnectedRef.current || !isComponentMounted) return;
+            if (isWsConnectedRef.current || !isComponentMounted || isPollingYaw) return;
+            isPollingYaw = true;
             try {
-                const res = await fetch('http://localhost:8007/api/trajectory');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 800);
+                const res = await fetch('http://127.0.0.1:8007/api/trajectory', { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (res.ok) {
                     const data = await res.json();
                     if (data.yaw !== undefined && isComponentMounted) {
@@ -182,8 +187,10 @@ export function useSimulation() {
                 }
             } catch {
                 hasTrajectoryYawRef.current = false;
+            } finally {
+                isPollingYaw = false;
             }
-        }, 100);
+        }, 150);
 
         return () => {
             isComponentMounted = false;

@@ -47,6 +47,7 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
     const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
 
     const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const activePortRef = useRef<number>(8007);
 
     const showToast = useCallback((msg: string) => {
         if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -56,37 +57,57 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
         }, 2800);
     }, []);
 
-    // 1. Fetch data dari Flask backend (http://localhost:8007/api/trajectory) setiap 100ms (10 Hz)
+    // 1. Polling stabil data telemetri dari Flask backend (127.0.0.1:8007 / 8008)
     useEffect(() => {
         let isMounted = true;
         let isFetching = false;
         let failureCount = 0;
+        let isLoopRunning = true;
+        let loopTimer: ReturnType<typeof setTimeout> | null = null;
 
         const fetchTrajectory = async () => {
-            // Cegah request overlap jika request sebelumnya belum selesai
             if (isFetching) return;
             isFetching = true;
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 1500);
+            const primaryPort = activePortRef.current;
+            const fallbackPort = primaryPort === 8007 ? 8008 : 8007;
+
+            let res: Response | null = null;
+            let usedPort = primaryPort;
 
             try {
-                let res: Response;
+                // Coba port aktif saat ini terlebih dahulu
                 try {
-                    res = await fetch('http://localhost:8007/api/trajectory', {
-                        signal: controller.signal,
+                    const prController = new AbortController();
+                    const prTimeout = setTimeout(() => prController.abort(), 1000);
+                    res = await fetch(`http://127.0.0.1:${primaryPort}/api/trajectory`, {
+                        signal: prController.signal,
                     });
+                    clearTimeout(prTimeout);
                     if (!res.ok) throw new Error();
                 } catch {
-                    res = await fetch('http://localhost:8008/api/trajectory', {
-                        signal: controller.signal,
-                    });
+                    // Jika port aktif gagal, coba port cadangan
+                    try {
+                        const fbController = new AbortController();
+                        const fbTimeout = setTimeout(() => fbController.abort(), 800);
+                        res = await fetch(`http://127.0.0.1:${fallbackPort}/api/trajectory`, {
+                            signal: fbController.signal,
+                        });
+                        clearTimeout(fbTimeout);
+                        if (res.ok) {
+                            usedPort = fallbackPort;
+                        }
+                    } catch {
+                        res = null;
+                    }
                 }
-                clearTimeout(timeoutId);
 
-                if (!res.ok) {
-                    throw new Error(`HTTP error! status: ${res.status}`);
+                if (!res || !res.ok) {
+                    throw new Error('Gagal mengambil telemetri dari port 8007 maupun 8008');
                 }
+
+                // Simpan port yang berhasil agar request berikutnya langsung ke port ini
+                activePortRef.current = usedPort;
 
                 const data: TrajectoryTelemetry = await res.json();
                 if (!isMounted) return;
@@ -99,7 +120,6 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                 setLivePath((prev) => {
                     const last = prev[prev.length - 1];
                     const currentPt = { x: data.x, y: data.y };
-                    // Catat titik jika bergerak minimal 1cm (0.01m)
                     if (!last || Math.hypot(data.x - last.x, data.y - last.y) >= 0.01) {
                         const updated = [...prev, currentPt];
                         return updated.length > 1200 ? updated.slice(updated.length - 1200) : updated;
@@ -107,11 +127,10 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
                     return prev;
                 });
             } catch {
-                clearTimeout(timeoutId);
                 if (isMounted) {
                     failureCount++;
-                    // Hanya tandai OFFLINE jika gagal 5x berturut-turut untuk mencegah flickering
-                    if (failureCount >= 5) {
+                    // Hanya tandai OFFLINE jika gagal 4x berturut-turut untuk mencegah flickering
+                    if (failureCount >= 4) {
                         setIsBackendConnected(false);
                     }
                 }
@@ -120,25 +139,45 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
             }
         };
 
-        const interval = setInterval(fetchTrajectory, 50);
+        // Recursive polling: Request berikutnya baru dijadwalkan setelah request saat ini selesai
+        const runPollLoop = async () => {
+            if (!isLoopRunning) return;
+            await fetchTrajectory();
+            if (isLoopRunning) {
+                loopTimer = setTimeout(runPollLoop, 75); // 75ms interval aman & mulus (~13 Hz)
+            }
+        };
+
+        runPollLoop();
+
         return () => {
             isMounted = false;
-            clearInterval(interval);
+            isLoopRunning = false;
+            if (loopTimer) clearTimeout(loopTimer);
         };
     }, []);
 
     // 2. Tombol Kalibrasi Titik Origin ke Backend
     const handleCalibrateOrigin = async () => {
         setIsCalibrating(true);
+        const port = activePortRef.current;
         try {
-            const res = await fetch('http://localhost:8007/api/origin/calibrate', {
+            let res = await fetch(`http://127.0.0.1:${port}/api/origin/calibrate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
+            if (!res.ok) {
+                const altPort = port === 8007 ? 8008 : 8007;
+                res = await fetch(`http://127.0.0.1:${altPort}/api/origin/calibrate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
             if (res.ok) {
                 const resData = await res.json();
-                showToast(`✓ Origin Dikalibrasi ke Posisi Saat Ini: (X:${resData.origin.x}m, Y:${resData.origin.y}m)`);
-                // Clear recent path agar path dimulai ulang dari titik origin baru
+                const ox = resData.origin?.x ?? 0;
+                const oy = resData.origin?.y ?? 0;
+                showToast(`✓ Origin Dikalibrasi ke Posisi Saat Ini: (X:${ox}, Y:${oy})`);
                 setLivePath([{ x: 0, y: 0 }]);
                 if (autoCenter) setPanOffset({ x: 0, y: 0 });
             } else {
@@ -154,11 +193,19 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
 
     // 3. Tombol Reset Origin ke Default (0,0,0)
     const handleResetOrigin = async () => {
+        const port = activePortRef.current;
         try {
-            const res = await fetch('http://localhost:8007/api/origin/reset', {
+            let res = await fetch(`http://127.0.0.1:${port}/api/origin/reset`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
+            if (!res.ok) {
+                const altPort = port === 8007 ? 8008 : 8007;
+                res = await fetch(`http://127.0.0.1:${altPort}/api/origin/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
             if (res.ok) {
                 showToast('↺ Origin Di-reset ke Default (0, 0)');
                 setLivePath([]);
@@ -171,11 +218,11 @@ export const TrajectoryPanel: React.FC<TrajectoryPanelProps> = ({
 
     // 4. Toggle Sumber Data (REAL Pixhawk / DUMMY Simulation)
     const toggleSource = async () => {
+        const port = activePortRef.current;
         const nextSource = telemetry.source === 'real' ? 'dummy' : 'real';
-        // Optimistic UI update agar tombol langsung merespons seketika
         setTelemetry((prev) => ({ ...prev, source: nextSource }));
         try {
-            await fetch('http://localhost:8007/api/source', {
+            await fetch(`http://127.0.0.1:${port}/api/source`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ source: nextSource }),

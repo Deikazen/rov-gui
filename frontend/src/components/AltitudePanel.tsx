@@ -36,7 +36,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
 
     const interval = setInterval(async () => {
       try {
-        const response = await fetch("http://localhost:5001/api/telemetry");
+        const response = await fetch("http://127.0.0.1:5001/api/telemetry");
         if (!response.ok) return;
 
         const data: TelemetryData = await response.json();
@@ -57,7 +57,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
     }
     setInternalTelemetry((prev) => ({ ...prev, source: newSource }));
     try {
-      await fetch("http://localhost:5001/api/source", {
+      await fetch("http://127.0.0.1:5001/api/source", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: newSource }),

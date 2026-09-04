@@ -33,7 +33,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
       isFetching = true;
 
       try {
-        const response = await fetch("http://localhost:5001/api/telemetry");
+        const response = await fetch("http://127.0.0.1:5001/api/telemetry");
         if (!response.ok) {
           throw new Error(`HTTP error ${response.status}`);
         }
@@ -86,7 +86,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
     }));
 
     try {
-      await fetch("http://localhost:5001/api/source", {
+      await fetch("http://127.0.0.1:5001/api/source", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: newSource }),
