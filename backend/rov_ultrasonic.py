@@ -118,6 +118,7 @@ state_lock = threading.Lock()
 
 current_state = {
     "source": "ultrasonic",
+    "unit": "cm",
     "mapping_mode": DEFAULT_MAPPING_MODE,
     "formula": DEFAULT_FORMULA,
     "x": 0.0,
@@ -196,82 +197,61 @@ def parse_sensor_reading(sensor_data):
 
 def map_sensor_discrete(dist_cm):
     """
-    Logika if-elif diskrit persis sesuai catatan tangan di gambar:
-        if S == 500 cm : Pos = 1.0 m
-        elif S == 400 cm : Pos = 2.0 m
-        elif S == 300 cm : Pos = 3.0 m
-        elif S == 200 cm : Pos = 4.0 m
-        elif S == 100 cm : Pos = 5.0 m
+    Logika if-elif diskrit sesuai catatan tangan di gambar dalam satuan CENTIMETER (cm):
+        if S == 500 cm : Pos = 100.0 cm
+        elif S == 400 cm : Pos = 200.0 cm
+        elif S == 300 cm : Pos = 300.0 cm
+        elif S == 200 cm : Pos = 400.0 cm
+        elif S == 100 cm : Pos = 500.0 cm
     """
     if dist_cm is None or dist_cm <= 0:
         return None
 
     if dist_cm >= 450.0:         # Sekitar 500 cm
-        return 1.0
+        return 100.0
     elif dist_cm >= 350.0:       # Sekitar 400 cm
-        return 2.0
+        return 200.0
     elif dist_cm >= 250.0:       # Sekitar 300 cm
-        return 3.0
+        return 300.0
     elif dist_cm >= 150.0:       # Sekitar 200 cm
-        return 4.0
-    elif dist_cm >= 10.0:        # Sekitar 100 cm (min sensor 10cm s/d <150cm)
-        return 5.0
-    else:
-        return None
-
-def map_sensor_discrete_inverse(dist_cm):
-    """
-        Logika if-elif diskrit persis sesuai catatan tangan di gambar:
-            if S == 500 cm : Pos = 5.0 m
-            elif S == 400 cm : Pos = 4.0 m
-            elif S == 300 cm : Pos = 3.0 m
-            elif S == 200 cm : Pos = 2.0 m
-            elif S == 100 cm : Pos = 1.0 m
-    """
-    if dist_cm is None or dist_cm <= 0:
-        return None
-    
-    if dist_cm >= 450.0:        
-        return 1.0
-    elif dist_cm >= 350.0:      
-        return 2.0
-    elif dist_cm >= 250.0:      
-        return 3.0
-    elif dist_cm >= 150.0:      
-        return 4.0
-    elif dist_cm >= 10.0:       
-        return 5.0
-    else:
-        return None
+        return 400.0
+    elif dist_cm >= 50.0:        # Sekitar 100 cm
+        return 500.0
+    else:                        # Sangat dekat (<50cm)
+        return round(600.0 - dist_cm, 1)
 
 
 def map_sensor_continuous(dist_cm, formula="diagram"):
     """
-    Logika continuous linear interpolation tanpa batas kaku 5 meter:
-    - Rumus diagram: Pos = 6.0 - (dist_cm / 100.0)
-    - Tidak ada pembatasan/clamping ke 5 meter, jarak bebas.
+    Logika continuous linear interpolation dalam satuan CENTIMETER (cm):
+    - Rumus diagram: Pos = 600.0 - dist_cm
+    - Contoh:
+        dist = 500 cm -> Pos = 100.0 cm
+        dist = 400 cm -> Pos = 200.0 cm
+        dist = 300 cm -> Pos = 300.0 cm
+        dist = 200 cm -> Pos = 400.0 cm
+        dist = 100 cm -> Pos = 500.0 cm
     """
     if dist_cm is None or dist_cm <= 0:
         return None
 
-    dist_m = dist_cm / 100.0
-    pos = 6.0 - dist_m
-    return round(pos, 3)
+    pos_cm = 600.0 - dist_cm
+    return round(pos_cm, 1)
 
 
 def calculate_trajectory(s1_dict, s2_dict, mode=DEFAULT_MAPPING_MODE, formula=DEFAULT_FORMULA):
     """
-    Menghitung posisi wahana (X, Y) dari pembacaan sensor S1 dan S2:
-    - Sensor 1 (S1) -> Mengendalikan Sumbu Y (depan/atas kolam)
-    - Sensor 2 (S2) -> Mengendalikan Sumbu X (kanan kolam)
+    Menghitung posisi wahana (X, Y) dari pembacaan sensor S1 dan S2 dalam satuan CENTIMETER (cm):
+    - Sensor 1 (S1) -> Mengendalikan Sumbu Y (depan/atas kolam) dalam cm
+    - Sensor 2 (S2) -> Mengendalikan Sumbu X (kanan kolam) dalam cm
     - Jarak maksimum tidak dibatasi 5 meter (bebas)
     """
     s1_mm, s1_cm, s1_status = parse_sensor_reading(s1_dict)
     s2_mm, s2_cm, s2_status = parse_sensor_reading(s2_dict)
 
     if mode == "discrete":
-        calc_y = map_sensor_discrete_inverse(s1_cm)
-        calc_x = map_sensor_discrete_inverse(s2_cm)
+        calc_y = map_sensor_discrete(s1_cm)
+        calc_x = map_sensor_discrete(s2_cm)
     else:
         calc_y = map_sensor_continuous(s1_cm, formula=formula)
         calc_x = map_sensor_continuous(s2_cm, formula=formula)
@@ -302,9 +282,9 @@ async def ws_handler(websocket):
     client_ip = websocket.remote_address[0]
     print(f"\n[+] Jetson Nano terhubung dari: {client_ip}")
     print(
-        f"[*] Mode Mapping: {current_state['mapping_mode'].upper()} | Ukuran Kolam: {POOL_WIDTH:.0f}x{POOL_HEIGHT:.0f}m")
-    print(f"{'Timestamp':<10} | {'Sensor 1 (-> Y)':<26} | {'Sensor 2 (-> X)':<26} | {'Posisi (X, Y)':<18} | {'Status'}")
-    print("-" * 92)
+        f"[*] Mode Mapping: {current_state['mapping_mode'].upper()} | Satuan Posisi (X, Y): CENTIMETER (cm)")
+    print(f"{'Timestamp':<10} | {'Sensor 1 (-> Y)':<26} | {'Sensor 2 (-> X)':<26} | {'Posisi (X, Y) [cm]':<22} | {'Status'}")
+    print("-" * 96)
 
     with state_lock:
         current_state["connected_client"] = client_ip
@@ -347,27 +327,27 @@ async def ws_handler(websocket):
                     current_state["s2_status"] = res["s2_status"]
                     current_state["in_bounds"] = res["in_bounds"]
 
-                    # UPDATE SUMBU X DAN Y SECARA INDEPENDEN DAN INSTAN!
+                    # UPDATE SUMBU X DAN Y SECARA INDEPENDEN DAN INSTAN (dalam satuan cm)!
                     if res["x"] is not None:
                         current_state["raw_x"] = res["x"]
                         current_state["x"] = round(
-                            res["x"] - current_state["origin_x"], 3)
+                            res["x"] - current_state["origin_x"], 1)
                     if res["y"] is not None:
                         current_state["raw_y"] = res["y"]
                         current_state["y"] = round(
-                            res["y"] - current_state["origin_y"], 3)
+                            res["y"] - current_state["origin_y"], 1)
 
                     cur_x = current_state["x"]
                     cur_y = current_state["y"]
 
-                    # Catat riwayat titik trajectory instan jika koordinat bergeser
+                    # Catat riwayat titik trajectory instan jika koordinat bergeser minimal 1.0 cm
                     last_pt = trajectory_history[-1] if trajectory_history else None
                     if (
                         not isinstance(last_pt, dict)
                         or math.hypot(
                             cur_x - last_pt.get("x", cur_x),
                             cur_y - last_pt.get("y", cur_y),
-                        ) >= 0.01
+                        ) >= 1.0
                     ):
                         trajectory_history.append({
                             "x": cur_x,
@@ -381,7 +361,7 @@ async def ws_handler(websocket):
                     res["s1_mm"], res["s1_cm"], res["s1_status"])
                 s2_str = format_sensor(
                     res["s2_mm"], res["s2_cm"], res["s2_status"])
-                pos_str = f"X:{cur_x:4.2f}m, Y:{cur_y:4.2f}m"
+                pos_str = f"X:{cur_x:5.1f}cm, Y:{cur_y:5.1f}cm"
                 bound_status = "OK" if res["in_bounds"] else "OUT_OF_BOUNDS"
 
                 # Format timestamp aman
@@ -427,6 +407,7 @@ def get_trajectory():
     with state_lock:
         return jsonify({
             "source": current_state["source"],
+            "unit": current_state.get("unit", "cm"),
             "x": current_state["x"],
             "y": current_state["y"],
             "z": current_state["z"],

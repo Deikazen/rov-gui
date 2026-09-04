@@ -45,13 +45,13 @@ async def run_sender():
 
             # S1 (Y) dan S2 (X) dalam milimeter (5000mm = 500cm, dst.)
             discrete_test_cases = [
-                (5000, 5000, "Expect: X = 1.0m, Y = 1.0m"),
-                (4000, 4000, "Expect: X = 2.0m, Y = 2.0m"),
-                (3000, 3000, "Expect: X = 3.0m, Y = 3.0m"),
-                (2000, 2000, "Expect: X = 4.0m, Y = 4.0m"),
-                (1000, 1000, "Expect: X = 5.0m, Y = 5.0m"),
-                (3000, 5000, "Expect: X = 1.0m, Y = 3.0m"),
-                (1000, 2000, "Expect: X = 4.0m, Y = 5.0m"),
+                (5000, 5000, "Expect: X = 100cm, Y = 100cm"),
+                (4000, 4000, "Expect: X = 200cm, Y = 200cm"),
+                (3000, 3000, "Expect: X = 300cm, Y = 300cm"),
+                (2000, 2000, "Expect: X = 400cm, Y = 400cm"),
+                (1000, 1000, "Expect: X = 500cm, Y = 500cm"),
+                (3000, 5000, "Expect: X = 100cm, Y = 300cm"),
+                (1000, 2000, "Expect: X = 400cm, Y = 500cm"),
             ]
 
             for s1_mm, s2_mm, desc in discrete_test_cases:
