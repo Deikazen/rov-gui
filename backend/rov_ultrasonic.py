@@ -86,7 +86,7 @@ POOL_HEIGHT = 5.0       # Dimensi kolam sumbu Y (meter)
 DEFAULT_MAPPING_MODE = "continuous"
 DEFAULT_FORMULA = "diagram"  # Pos = 6.0 - (dist_cm / 100)
 
-
+# helper function
 def kill_process_on_port(port: int):
     """Mencari dan mematikan proses lain yang sedang menduduki port target."""
     current_pid = os.getpid()
@@ -104,7 +104,7 @@ def kill_process_on_port(port: int):
                 except (psutil.NoSuchProcess, psutil.AccessDenied) as err:
                     print(f"[!] Gagal mematikan proses PID {conn.pid}: {err}")
 
-
+# helper function
 def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     """Cek apakah suatu port sedang digunakan."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -219,6 +219,31 @@ def map_sensor_discrete(dist_cm):
     else:
         return None
 
+def map_sensor_discrete_inverse(dist_cm):
+    """
+        Logika if-elif diskrit persis sesuai catatan tangan di gambar:
+            if S == 500 cm : Pos = 5.0 m
+            elif S == 400 cm : Pos = 4.0 m
+            elif S == 300 cm : Pos = 3.0 m
+            elif S == 200 cm : Pos = 2.0 m
+            elif S == 100 cm : Pos = 1.0 m
+    """
+    if dist_cm is None or dist_cm <= 0:
+        return None
+    
+    if dist_cm >= 450.0:        
+        return 1.0
+    elif dist_cm >= 350.0:      
+        return 2.0
+    elif dist_cm >= 250.0:      
+        return 3.0
+    elif dist_cm >= 150.0:      
+        return 4.0
+    elif dist_cm >= 10.0:       
+        return 5.0
+    else:
+        return None
+
 
 def map_sensor_continuous(dist_cm, formula="diagram"):
     """
@@ -245,8 +270,8 @@ def calculate_trajectory(s1_dict, s2_dict, mode=DEFAULT_MAPPING_MODE, formula=DE
     s2_mm, s2_cm, s2_status = parse_sensor_reading(s2_dict)
 
     if mode == "discrete":
-        calc_y = map_sensor_discrete(s1_cm)
-        calc_x = map_sensor_discrete(s2_cm)
+        calc_y = map_sensor_discrete_inverse(s1_cm)
+        calc_x = map_sensor_discrete_inverse(s2_cm)
     else:
         calc_y = map_sensor_continuous(s1_cm, formula=formula)
         calc_x = map_sensor_continuous(s2_cm, formula=formula)
@@ -337,7 +362,13 @@ async def ws_handler(websocket):
 
                     # Catat riwayat titik trajectory instan jika koordinat bergeser
                     last_pt = trajectory_history[-1] if trajectory_history else None
-                    if not last_pt or math.hypot(cur_x - last_pt["x"], cur_y - last_pt["y"]) >= 0.01:
+                    if (
+                        not isinstance(last_pt, dict)
+                        or math.hypot(
+                            cur_x - last_pt.get("x", cur_x),
+                            cur_y - last_pt.get("y", cur_y),
+                        ) >= 0.01
+                    ):
                         trajectory_history.append({
                             "x": cur_x,
                             "y": cur_y,
@@ -370,12 +401,14 @@ async def ws_handler(websocket):
                 continue
 
     except websockets.exceptions.ConnectionClosed as err:
-        print(f"\n[-] Koneksi dari {client_ip} terputus (Code: {err.code}, Reason: '{err.reason}').")
+        print(
+            f"\n[-] Koneksi dari {client_ip} terputus (Code: {err.code}, Reason: '{err.reason}').")
         with state_lock:
             current_state["connected_client"] = None
             current_state["ultrasonic_connected"] = False
     except Exception as e:
-        print(f"\n[!] Error tak terduga pada ws_handler: {type(e).__name__}: {e}")
+        print(
+            f"\n[!] Error tak terduga pada ws_handler: {type(e).__name__}: {e}")
         with state_lock:
             current_state["connected_client"] = None
             current_state["ultrasonic_connected"] = False
@@ -527,7 +560,8 @@ async def main():
         ws_handler,
         HOST,
         WS_PORT,
-        ping_interval=None,   # Matikan ping_interval bawaan agar tidak terputus timeout saat Jetson sibuk
+        # Matikan ping_interval bawaan agar tidak terputus timeout saat Jetson sibuk
+        ping_interval=None,
         ping_timeout=None,    # Matikan timeout ping agresif
         close_timeout=15,     # Waktu toleransi penutupan koneksi
         max_size=2**20,       # Kapasitas payload 1MB
