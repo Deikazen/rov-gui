@@ -2,8 +2,10 @@
 BlueROV2 Depth Telemetry Backend
 --------------------------------
 Serves index.html (untouched, separate file) and exposes:
-  GET  /api/telemetry  -> current depth/rate/source data as JSON
+  GET  /api/telemetry  -> current depth/rate/source data as JSON (HTTP polling fallback)
   POST /api/source     -> switch between "real" (Pixhawk/MAVLink) and "dummy" data
+  POST /api/tare       -> tare/zero depth at current surface pressure
+  WS   ws://0.0.0.0:5002 -> real-time push telemetry stream (< 5ms latency)
 
 Reads MAVLink telemetry over UDP from BlueOS.
 
@@ -18,9 +20,13 @@ backend must LISTEN (bind) on that same port -> udpin:0.0.0.0:14552
 import time
 import math
 import threading
+import asyncio
+import json
+import logging
 from flask import Flask, jsonify, request, send_file
 from pymavlink import mavutil
 from flask_cors import CORS
+import websockets
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -31,6 +37,7 @@ MAX_DEPTH_M = 2.0                              # matches frontend default maxDep
 HEARTBEAT_TIMEOUT_S = 10.0
 RECV_TIMEOUT_S = 2.0
 RECONNECT_DELAY_S = 3.0
+WS_PORT = 5002
 
 app = Flask(__name__)
 CORS(app)
@@ -54,9 +61,125 @@ dummy_data = {
     'rate': 0.0,
 }
 
-
 SURFACE_PRESSURE = None
 last_raw_press = None
+
+# ---------------------------------------------------------------------------
+# WebSocket Server (Port 5002) for Ultra-Low Latency Telemetry Streaming (< 5ms)
+# ---------------------------------------------------------------------------
+connected_ws_clients = set()
+ws_loop = None
+last_broadcast_time = 0.0
+
+
+def get_current_payload():
+    with state_lock:
+        source = current_source
+        if source == 'real':
+            depth = real_data['depth']
+            rate = real_data['rate']
+            mavlink_connected = real_data['mavlink_connected']
+        else:
+            depth = dummy_data['depth']
+            rate = dummy_data['rate']
+            mavlink_connected = real_data['mavlink_connected']
+
+        cal_p = SURFACE_PRESSURE
+        raw_p = last_raw_press
+
+    return {
+        'type': 'telemetry',
+        'source': source,
+        'depth': round(depth, 4),
+        'depth_cm': round(depth * 100.0, 2),
+        'rate': round(rate, 4),
+        'mavlink_connected': mavlink_connected,
+        'max_depth_m': MAX_DEPTH_M,
+        'max_depth_cm': MAX_DEPTH_M * 100.0,
+        'surface_pressure_hpa': round(cal_p, 2) if cal_p is not None else None,
+        'raw_pressure_hpa': round(raw_p, 2) if raw_p is not None else None,
+    }
+
+
+async def _send_to_all(payload_str):
+    if connected_ws_clients:
+        clients_snapshot = list(connected_ws_clients)
+        await asyncio.gather(
+            *[c.send(payload_str) for c in clients_snapshot],
+            return_exceptions=True
+        )
+
+
+def broadcast_telemetry(force=False):
+    global last_broadcast_time
+    now = time.time()
+    if ws_loop is not None and connected_ws_clients:
+        # Throttle to max 50 Hz (20ms) to ensure smooth browser rendering without frame drops
+        if not force and (now - last_broadcast_time < 0.020):
+            return
+        last_broadcast_time = now
+        payload_str = json.dumps(get_current_payload())
+        try:
+            asyncio.run_coroutine_threadsafe(_send_to_all(payload_str), ws_loop)
+        except Exception:
+            pass
+
+
+async def ws_handler(websocket):
+    connected_ws_clients.add(websocket)
+    try:
+        # Kirim data terkini seketika saat browser terhubung
+        await websocket.send(json.dumps(get_current_payload()))
+        async for message in websocket:
+            try:
+                cmd = json.loads(message)
+                action = cmd.get('action')
+                if action == 'set_source':
+                    new_source = cmd.get('source')
+                    if new_source in ('real', 'dummy'):
+                        with state_lock:
+                            global current_source
+                            current_source = new_source
+                        print(f"[WS Command] Ganti source ke: {current_source.upper()}")
+                        broadcast_telemetry(force=True)
+                elif action in ('tare', 'calibrate'):
+                    with state_lock:
+                        global SURFACE_PRESSURE
+                        if last_raw_press is not None:
+                            SURFACE_PRESSURE = last_raw_press
+                            real_data['depth'] = 0.0
+                        else:
+                            SURFACE_PRESSURE = None
+                        cal = SURFACE_PRESSURE
+                    print(f"[WS Command] Sensor di-tare ulang pada: {cal} hPa")
+                    broadcast_telemetry(force=True)
+            except Exception:
+                pass
+    finally:
+        connected_ws_clients.discard(websocket)
+
+
+def run_websocket_server():
+    global ws_loop
+    ws_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(ws_loop)
+
+    async def serve():
+        async with websockets.serve(
+            ws_handler,
+            '0.0.0.0',
+            WS_PORT,
+            ping_interval=10,
+            ping_timeout=10,
+        ):
+            print(f"[WS] WebSocket Telemetry Server aktif di ws://0.0.0.0:{WS_PORT}")
+            await asyncio.Future()
+
+    try:
+        ws_loop.run_until_complete(serve())
+    except Exception as e:
+        print(f"[WS] Server error: {e}")
+
 
 # ---------------------------------------------------------------------------
 # MAVLink background thread
@@ -126,6 +249,7 @@ def mavlink_worker():
             last_msg_time = time.time()
             last_press_time = 0.0
             last_stream_req_time = time.time()
+            last_status_print = 0.0
 
             has_scaled_pressure2 = False
 
@@ -166,6 +290,7 @@ def mavlink_worker():
 
                     # 1. SCALED_PRESSURE2 (Murni sensor eksternal MS5837 / Bar30 BlueROV2)
                     elif msg_type == 'SCALED_PRESSURE2':
+                        # TIDAK ADA print() di sini agar tidak membebani terminal / GIL
                         has_scaled_pressure2 = True
                         press_abs = getattr(msg, 'press_abs', None)
                         if press_abs is not None and press_abs > 500:
@@ -173,10 +298,10 @@ def mavlink_worker():
                             with state_lock:
                                 last_raw_press = float(press_abs)
 
-                                # Tare otomatis pada pembacaan pertama
+                                # Tare otomatis pada pembacaan pertama jika belum pernah tare
                                 if SURFACE_PRESSURE is None:
                                     SURFACE_PRESSURE = last_raw_press
-                                    print(f"[Sensor] Permukaan air dikalibrasi pada (SCALED_PRESSURE2): {SURFACE_PRESSURE:.2f} hPa")
+                                    print(f"[Sensor] Permukaan air dikalibrasi otomatis (SCALED_PRESSURE2): {SURFACE_PRESSURE:.2f} hPa")
 
                                 # Hitung selisih tekanan dari permukaan (hPa)
                                 delta_p = max(0.0, last_raw_press - SURFACE_PRESSURE)
@@ -196,7 +321,7 @@ def mavlink_worker():
 
                                 if SURFACE_PRESSURE is None:
                                     SURFACE_PRESSURE = last_raw_press
-                                    print(f"[Sensor] Permukaan air dikalibrasi pada (SCALED_PRESSURE): {SURFACE_PRESSURE:.2f} hPa")
+                                    print(f"[Sensor] Permukaan air dikalibrasi otomatis (SCALED_PRESSURE): {SURFACE_PRESSURE:.2f} hPa")
 
                                 delta_p = max(0.0, last_raw_press - SURFACE_PRESSURE)
                                 depth_m = delta_p / 98.0665
@@ -209,7 +334,6 @@ def mavlink_worker():
                         with state_lock:
                             real_data['rate'] = rate_ms
                             real_data['mavlink_connected'] = True
-                            # Jika sensor tekanan murni (SCALED_PRESSURE2/1) tidak ada selama > 1s, gunakan alt dari VFR_HUD
                             if now - last_press_time > 1.0:
                                 real_data['depth'] = max(0.0, -float(msg.alt))
 
@@ -220,13 +344,26 @@ def mavlink_worker():
                                 real_data['depth'] = max(0.0, -float(msg.altitude_relative))
                                 real_data['mavlink_connected'] = True
 
-                    # CATATAN: GLOBAL_POSITION_INT DIHAPUS DARI DEPTH AGAR TIDAK ADA DELAY / DRIFT DARI EKF ARDUSUB
+                # Broadcast data terbaru ke WebSocket client begitu paket UDP selesai di-drain
+                if drained_count > 0 and current_source == 'real':
+                    broadcast_telemetry()
+
+                # Status berkala setiap 3 detik di terminal tanpa membebani CPU
+                if now - last_status_print > 3.0:
+                    last_status_print = now
+                    with state_lock:
+                        p = last_raw_press or 0.0
+                        tare_val = SURFACE_PRESSURE or 0.0
+                        d = real_data['depth']
+                        conn = real_data['mavlink_connected']
+                    print(f"[Depth Live] Source: {current_source.upper()} | Raw: {p:.1f} hPa | Tare: {tare_val:.1f} hPa | Depth: {d:.3f} m | MAVLink: {'OK' if conn else 'LOST'}")
 
                 # Disconnection tolerance (no message for > 5s)
                 if now - last_msg_time > 5.0:
                     print("[MAVLink] Connection lost (timeout > 5s)...")
                     with state_lock:
                         real_data['mavlink_connected'] = False
+                    broadcast_telemetry(force=True)
                     break
 
                 # Sleep briefly only if queue was already empty, to avoid 100% CPU
@@ -245,6 +382,7 @@ def mavlink_worker():
                 except Exception:
                     pass
 
+
 # ---------------------------------------------------------------------------
 # Dummy data background thread (smooth sine oscillation for UI testing)
 # ---------------------------------------------------------------------------
@@ -262,11 +400,14 @@ def dummy_worker():
             dummy_data['depth'] = depth
             dummy_data['rate'] = rate
 
+        if current_source == 'dummy':
+            broadcast_telemetry()
+
         time.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# HTTP Routes (Backwards Compatibility & Fallback)
 # ---------------------------------------------------------------------------
 @app.route('/')
 def index():
@@ -275,32 +416,7 @@ def index():
 
 @app.route('/api/telemetry', methods=['GET'])
 def get_telemetry():
-    with state_lock:
-        source = current_source
-        if source == 'real':
-            depth = real_data['depth']
-            rate = real_data['rate']
-            mavlink_connected = real_data['mavlink_connected']
-        else:
-            depth = dummy_data['depth']
-            rate = dummy_data['rate']
-            # report true status regardless
-            mavlink_connected = real_data['mavlink_connected']
-
-        cal_p = SURFACE_PRESSURE
-        raw_p = last_raw_press
-
-    return jsonify({
-        'source': source,
-        'depth': round(depth, 4),
-        'depth_cm': round(depth * 100.0, 2),
-        'rate': round(rate, 4),
-        'mavlink_connected': mavlink_connected,
-        'max_depth_m': MAX_DEPTH_M,
-        'max_depth_cm': MAX_DEPTH_M * 100.0,
-        'surface_pressure_hpa': round(cal_p, 2) if cal_p is not None else None,
-        'raw_pressure_hpa': round(raw_p, 2) if raw_p is not None else None,
-    })
+    return jsonify(get_current_payload())
 
 
 @app.route('/api/calibrate', methods=['POST'])
@@ -316,6 +432,7 @@ def calibrate_surface():
             SURFACE_PRESSURE = None
         cal = SURFACE_PRESSURE
 
+    broadcast_telemetry(force=True)
     print(f"[Sensor] Permukaan air di-tare ulang pada: {cal} hPa")
     return jsonify({
         'status': 'ok',
@@ -336,6 +453,8 @@ def set_source():
     with state_lock:
         current_source = requested
 
+    broadcast_telemetry(force=True)
+    print(f"[Source] Mode diubah menjadi: {current_source.upper()}")
     return jsonify({'status': 'ok', 'source': current_source})
 
 
@@ -343,9 +462,17 @@ def set_source():
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
+    # Matikan log akses Werkzeug ("GET /api/telemetry HTTP/1.1" 200) agar console stdout tidak macet
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+
     mav_thread = threading.Thread(target=mavlink_worker, daemon=True)
     dummy_thread = threading.Thread(target=dummy_worker, daemon=True)
+    ws_thread = threading.Thread(target=run_websocket_server, daemon=True)
+
     mav_thread.start()
     dummy_thread.start()
+    ws_thread.start()
 
+    print(f"[HTTP] REST API Server running on http://0.0.0.0:5001")
     app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)

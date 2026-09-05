@@ -15,12 +15,14 @@ interface AltitudePanelProps {
   altPrev?: number;
   depthTelemetry?: DepthTelemetryData;
   onToggleSource?: (source: "real" | "dummy") => void;
+  onTare?: () => void;
 }
 
 export const AltitudePanel: React.FC<AltitudePanelProps> = ({
   altitude: fallbackAltitude = 0,
   depthTelemetry,
   onToggleSource,
+  onTare,
 }) => {
   const [internalTelemetry, setInternalTelemetry] = useState<TelemetryData>({
     source: "real",
@@ -220,6 +222,10 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
             <button
               type="button"
               onClick={async () => {
+                if (onTare) {
+                  onTare();
+                  return;
+                }
                 try {
                   const res = await fetch("http://127.0.0.1:5001/api/calibrate", { method: "POST" });
                   if (!res.ok) {

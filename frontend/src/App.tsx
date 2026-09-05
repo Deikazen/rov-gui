@@ -211,6 +211,7 @@ export function App() {
             altPrev={altPrev}
             depthTelemetry={depthTelemetry}
             onToggleSource={depthTelemetry.toggleSource}
+            onTare={depthTelemetry.tare}
           />
           <TrajectoryPanel
             rovPos={rovPos}
