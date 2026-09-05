@@ -23,7 +23,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
   onToggleSource,
 }) => {
   const [internalTelemetry, setInternalTelemetry] = useState<TelemetryData>({
-    source: "dummy",
+    source: "real",
     depth: fallbackAltitude,
     depth_cm: fallbackAltitude * 100,
     rate: 0,
@@ -168,41 +168,77 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
             alignItems: "center",
           }}
         >
-          <button
-            onClick={() =>
-              handleToggleSource(telemetry.source === "real" ? "dummy" : "real")
-            }
+          {/* Segmented Mode Selector: REAL vs DUMMY */}
+          <div
             style={{
-              padding: "2px 6px",
-              fontSize: "9px",
-              cursor: "pointer",
-              background: telemetry.source === "real" ? "#0284c7" : "#4b5563",
-              color: "#fff",
-              border: "none",
-              borderRadius: "3px",
+              display: "inline-flex",
+              borderRadius: "4px",
+              overflow: "hidden",
+              border: "1px solid #444",
+              background: "#1e1e1e",
             }}
           >
-            {telemetry.source.toUpperCase()}
-          </button>
+            <button
+              type="button"
+              onClick={() => handleToggleSource("real")}
+              title="Aktifkan pembacaan data nyata dari sensor Pixhawk"
+              style={{
+                padding: "2px 7px",
+                fontSize: "9px",
+                cursor: "pointer",
+                background: telemetry.source === "real" ? "#0284c7" : "transparent",
+                color: telemetry.source === "real" ? "#ffffff" : "var(--text-muted)",
+                border: "none",
+                fontWeight: telemetry.source === "real" ? "bold" : "normal",
+                transition: "all 0.15s ease",
+              }}
+            >
+              REAL
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleSource("dummy")}
+              title="Aktifkan simulasi dummy"
+              style={{
+                padding: "2px 7px",
+                fontSize: "9px",
+                cursor: "pointer",
+                background: telemetry.source === "dummy" ? "#4b5563" : "transparent",
+                color: telemetry.source === "dummy" ? "#ffffff" : "var(--text-muted)",
+                border: "none",
+                borderLeft: "1px solid #444",
+                fontWeight: telemetry.source === "dummy" ? "bold" : "normal",
+                transition: "all 0.15s ease",
+              }}
+            >
+              DUMMY
+            </button>
+          </div>
 
+          {/* Tombol TARE: Selalu tampil saat mode REAL */}
           {telemetry.source === "real" && (
             <button
+              type="button"
               onClick={async () => {
                 try {
-                  await fetch("http://127.0.0.1:5001/api/calibrate", { method: "POST" });
+                  const res = await fetch("http://127.0.0.1:5001/api/calibrate", { method: "POST" });
+                  if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                  }
                 } catch (e) {
                   console.error("Gagal tare sensor:", e);
                 }
               }}
               title="Tare / Nolkan pembacaan sensor kedalaman di permukaan saat ini"
               style={{
-                padding: "2px 6px",
+                padding: "2px 7px",
                 fontSize: "9px",
                 cursor: "pointer",
                 background: "#059669",
                 color: "#fff",
                 border: "none",
                 borderRadius: "3px",
+                fontWeight: "bold",
               }}
             >
               TARE

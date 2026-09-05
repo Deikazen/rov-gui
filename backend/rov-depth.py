@@ -40,8 +40,8 @@ CORS(app)
 # ---------------------------------------------------------------------------
 state_lock = threading.Lock()
 
-# 'dummy' or 'real' - matches frontend default (Dummy Data active)
-current_source = 'dummy'
+# 'dummy' or 'real' - default to 'real' for physical ROV sensor
+current_source = 'real'
 
 real_data = {
     'depth': 0.0,
