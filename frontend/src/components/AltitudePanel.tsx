@@ -44,7 +44,7 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
       } catch (error) {
         console.error("Gagal mengambil data telemetri:", error);
       }
-    }, 100);
+    }, 50);
 
     return () => clearInterval(interval);
   }, [depthTelemetry]);

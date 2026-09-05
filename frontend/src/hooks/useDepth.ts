@@ -31,9 +31,14 @@ export function useDepth(fallbackSimDepth: number = 0) {
     const fetchTelemetry = async () => {
       if (isFetching) return;
       isFetching = true;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 350);
 
       try {
-        const response = await fetch("http://127.0.0.1:5001/api/telemetry");
+        const response = await fetch("http://127.0.0.1:5001/api/telemetry", {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
         if (!response.ok) {
           throw new Error(`HTTP error ${response.status}`);
         }
@@ -54,6 +59,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
           backendOnline: true,
         });
       } catch {
+        clearTimeout(timeoutId);
         if (!isMounted) return;
         // Backend offline: fallback ke simulasi
         setTelemetry((prev) => ({
@@ -69,7 +75,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
     };
 
     fetchTelemetry();
-    const interval = setInterval(fetchTelemetry, 100);
+    const interval = setInterval(fetchTelemetry, 50);
 
     return () => {
       isMounted = false;

@@ -59,6 +59,8 @@ dummy_data = {
 # MAVLink background thread
 # ---------------------------------------------------------------------------
 def mavlink_worker():
+    surface_pressure = None
+
     while True:
         master = None
         try:
@@ -73,65 +75,147 @@ def mavlink_worker():
                 time.sleep(RECONNECT_DELAY_S)
                 continue
 
+            target_sys = master.target_system or 1
+            target_comp = master.target_component or 1
             print(
-                f"[MAVLink] Heartbeat received. System ID: {master.target_system}")
+                f"[MAVLink] Heartbeat received. System ID: {target_sys}, Component ID: {target_comp}")
 
-            # Request semua data stream dari ArduSub (ALL STREAMS @ 10Hz)
+            with state_lock:
+                real_data['mavlink_connected'] = True
+
+            # Request high-frequency data streams from ArduSub
+            # 1. EXTRA2 stream (contains VFR_HUD: depth & climb rate) @ 20 Hz
             master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+                20, 1
+            )
+            # 2. RAW_SENSORS stream (contains SCALED_PRESSURE / Bar30) @ 20 Hz
+            master.mav.request_data_stream_send(
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS,
+                20, 1
+            )
+            # 3. POSITION stream (GLOBAL_POSITION_INT) @ 10 Hz
+            master.mav.request_data_stream_send(
+                target_sys, target_comp,
+                mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+                10, 1
+            )
+            # 4. ALL STREAMS fallback @ 10 Hz
+            master.mav.request_data_stream_send(
+                target_sys, target_comp,
                 mavutil.mavlink.MAV_DATA_STREAM_ALL,
                 10, 1
             )
 
+            # Request explicit message interval via MAVLink 2 if supported (50000 us = 20 Hz)
+            try:
+                master.mav.command_long_send(
+                    target_sys, target_comp,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                    0, 74, 50000, 0, 0, 0, 0, 0  # VFR_HUD (ID 74)
+                )
+            except Exception:
+                pass
+
             last_msg_time = time.time()
+            last_vfr_time = 0.0
+            last_alt_time = 0.0
+            last_stream_req_time = time.time()
+            surface_pressure = None
 
-            # Main receive loop
+            # Main fast receive loop - non-blocking queue drain to prevent UDP buffer lag
             while True:
-                # Tangkap SEMUA pesan MAVLink tanpa membatasi tipe di recv_match
-                msg = master.recv_match(blocking=True, timeout=1.0)
+                now = time.time()
 
-                if msg:
+                # Re-request streams every 10 seconds to ensure stream continuity
+                if now - last_stream_req_time > 10.0:
+                    try:
+                        master.mav.request_data_stream_send(
+                            target_sys, target_comp,
+                            mavutil.mavlink.MAV_DATA_STREAM_EXTRA2, 20, 1
+                        )
+                        master.mav.request_data_stream_send(
+                            target_sys, target_comp,
+                            mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS, 20, 1
+                        )
+                    except Exception:
+                        pass
+                    last_stream_req_time = now
+
+                # Drain all pending UDP packets so real_data immediately reflects the latest packet
+                drained_count = 0
+                while drained_count < 100:
+                    msg = master.recv_msg()
+                    if msg is None:
+                        break
+
+                    drained_count += 1
+                    last_msg_time = now
                     msg_type = msg.get_type()
 
-                    # Heartbeat menandakan koneksi MAVLink aktif
+                    # Heartbeat
                     if msg_type == 'HEARTBEAT':
-                        last_msg_time = time.time()
                         with state_lock:
                             real_data['mavlink_connected'] = True
 
-                    # 1. Coba dari GLOBAL_POSITION_INT (relative_alt dalam mm)
-                    elif msg_type == 'GLOBAL_POSITION_INT':
-                        print('GLOBAL_POSTITION')
-                        depth_m = max(0.0, -(msg.relative_alt / 1000.0))
-                        with state_lock:
-                            real_data['depth'] = depth_m
-
-                    # 2. Coba dari VFR_HUD (climb rate & alt)
+                    # 1. PRIMARY: VFR_HUD (ArduSub standard for depth & climb rate, direct & immediate)
                     elif msg_type == 'VFR_HUD':
-                        print('VFR_HUD')
+                        # In ArduSub, underwater altitude is negative depth (meters).
+                        # msg.alt is negative when submerged/pressed (e.g. -0.5m).
+                        depth_m = max(0.0, -float(msg.alt))
                         rate_ms = -float(msg.climb)
                         with state_lock:
-                            real_data['rate'] = rate_ms
-                            # Jika relative_alt tidak ada, gunakan alt dari VFR_HUD
-                            if real_data['depth'] == 0.0 and msg.alt < 0:
-                                real_data['depth'] = abs(float(msg.alt))
-
-                    # 3. Alternative: SCALED_PRESSURE (Sensor Bar30 bawaan BlueROV2)
-                    elif msg_type == 'SCALED_PRESSURE':
-                        # Konversi HPa ke Kedalaman Meter (p_barom / 98.0665)
-                        print('Scaled Pressure')
-                        press_diff = max(0.0, msg.press_diff)  # hPa
-                        depth_m = press_diff / 98.0665
-                        with state_lock:
                             real_data['depth'] = depth_m
+                            real_data['rate'] = rate_ms
+                            real_data['mavlink_connected'] = True
+                        last_vfr_time = now
 
-                # Toleransi disconnect jika tidak ada pesan apa pun selama 5 detik
-                if time.time() - last_msg_time > 5.0:
+                    # 2. HIGH PRECISION: ALTITUDE (MAVLink 2 message #141)
+                    elif msg_type == 'ALTITUDE':
+                        if hasattr(msg, 'altitude_relative'):
+                            depth_m = max(0.0, -float(msg.altitude_relative))
+                            with state_lock:
+                                real_data['depth'] = depth_m
+                                real_data['mavlink_connected'] = True
+                            last_alt_time = now
+
+                    # 3. DIRECT SENSOR PRESSURE: SCALED_PRESSURE2 (Bar30 external) or SCALED_PRESSURE
+                    elif msg_type in ('SCALED_PRESSURE2', 'SCALED_PRESSURE'):
+                        press_abs = getattr(msg, 'press_abs', None)
+                        if press_abs is not None and press_abs > 500:
+                            if surface_pressure is None:
+                                surface_pressure = float(press_abs)
+                            
+                            # Fallback if VFR_HUD is not actively publishing
+                            if now - last_vfr_time > 1.0 and now - last_alt_time > 1.0:
+                                delta_p = max(0.0, float(press_abs) - surface_pressure)
+                                depth_m = delta_p / 98.0665
+                                with state_lock:
+                                    real_data['depth'] = depth_m
+                                    real_data['mavlink_connected'] = True
+
+                    # 4. FALLBACK: GLOBAL_POSITION_INT (relative_alt in mm from EKF)
+                    elif msg_type == 'GLOBAL_POSITION_INT':
+                        # Only use as fallback when direct sensor streams (VFR_HUD/ALTITUDE) are absent
+                        if now - last_vfr_time > 1.0 and now - last_alt_time > 1.0:
+                            if hasattr(msg, 'relative_alt'):
+                                depth_m = max(0.0, -float(msg.relative_alt) / 1000.0)
+                                with state_lock:
+                                    real_data['depth'] = depth_m
+                                    real_data['mavlink_connected'] = True
+
+                # Disconnection tolerance (no message for > 5s)
+                if now - last_msg_time > 5.0:
                     print("[MAVLink] Connection lost (timeout > 5s)...")
                     with state_lock:
                         real_data['mavlink_connected'] = False
                     break
+
+                # Sleep briefly only if queue was already empty, to avoid 100% CPU
+                if drained_count == 0:
+                    time.sleep(0.002)
 
         except Exception as e:
             print(f"[MAVLink] Error: {e}")
@@ -148,8 +232,6 @@ def mavlink_worker():
 # ---------------------------------------------------------------------------
 # Dummy data background thread (smooth sine oscillation for UI testing)
 # ---------------------------------------------------------------------------
-
-
 def dummy_worker():
     speed = 0.4  # rad/s, controls oscillation speed
     t0 = time.time()
@@ -164,7 +246,7 @@ def dummy_worker():
             dummy_data['depth'] = depth
             dummy_data['rate'] = rate
 
-        time.sleep(0.1)
+        time.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -224,4 +306,4 @@ if __name__ == '__main__':
     mav_thread.start()
     dummy_thread.start()
 
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)

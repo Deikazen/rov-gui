@@ -78,28 +78,25 @@ def mavlink_worker_depth():
                         last_msg_time = time.time()
                         depth_data['mavlink_connected'] = True
 
-                    # 1. Coba dari GLOBAL_POSITION_INT (relative_alt dalam mm)
-                    elif msg_type == 'GLOBAL_POSITION_INT':
-                        print('GLOBAL_POSTITION')
-                        depth_m = max(0.0, -(msg.relative_alt / 1000.0))
-                        depth_data['depth'] = depth_m
-
-                    # 2. Coba dari VFR_HUD (climb rate & alt)
-                    elif msg_type == 'VFR_HUD':
-                        print('VFR_HUD')
+                    # 1. VFR_HUD: Primary & direct depth source from ArduSub
+                    if msg_type == 'VFR_HUD':
+                        depth_m = max(0.0, -float(msg.alt))
                         rate_ms = -float(msg.climb)
-                        depth_data['rate'] = rate_ms
-                         # Jika relative_alt tidak ada, gunakan alt dari VFR_HUD
-                        if depth_data['depth'] == 0.0 and msg.alt < 0:
-                                depth_data['depth'] = abs(float(msg.alt))
-
-                    # 3. Alternative: SCALED_PRESSURE (Sensor Bar30 bawaan BlueROV2)
-                    elif msg_type == 'SCALED_PRESSURE':
-                        # Konversi HPa ke Kedalaman Meter (p_barom / 98.0665)
-                        print('Scaled Pressure')
-                        press_diff = max(0.0, msg.press_diff)  # hPa
-                        depth_m = press_diff / 98.0665
                         depth_data['depth'] = depth_m
+                        depth_data['rate'] = rate_ms
+                        depth_data['mavlink_connected'] = True
+
+                    # 2. ALTITUDE: MAVLink 2 relative altitude
+                    elif msg_type == 'ALTITUDE':
+                        if hasattr(msg, 'altitude_relative'):
+                            depth_data['depth'] = max(0.0, -float(msg.altitude_relative))
+                            depth_data['mavlink_connected'] = True
+
+                    # 3. Fallback: GLOBAL_POSITION_INT
+                    elif msg_type == 'GLOBAL_POSITION_INT':
+                        if hasattr(msg, 'relative_alt'):
+                            depth_data['depth'] = max(0.0, -float(msg.relative_alt) / 1000.0)
+                            depth_data['mavlink_connected'] = True
 
                 # Toleransi disconnect jika tidak ada pesan apa pun selama 5 detik
                 if time.time() - last_msg_time > 5.0:
