@@ -55,11 +55,14 @@ dummy_data = {
 }
 
 
+SURFACE_PRESSURE = None
+last_raw_press = None
+
 # ---------------------------------------------------------------------------
 # MAVLink background thread
 # ---------------------------------------------------------------------------
 def mavlink_worker():
-    surface_pressure = None
+    global SURFACE_PRESSURE, last_raw_press
 
     while True:
         master = None
@@ -84,25 +87,19 @@ def mavlink_worker():
                 real_data['mavlink_connected'] = True
 
             # Request high-frequency data streams from ArduSub
-            # 1. EXTRA2 stream (contains VFR_HUD: depth & climb rate) @ 20 Hz
-            master.mav.request_data_stream_send(
-                target_sys, target_comp,
-                mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
-                20, 1
-            )
-            # 2. RAW_SENSORS stream (contains SCALED_PRESSURE / Bar30) @ 20 Hz
+            # 1. RAW_SENSORS stream (SCALED_PRESSURE2 / Bar30 MS5837) @ 20 Hz
             master.mav.request_data_stream_send(
                 target_sys, target_comp,
                 mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS,
                 20, 1
             )
-            # 3. POSITION stream (GLOBAL_POSITION_INT) @ 10 Hz
+            # 2. EXTRA2 stream (VFR_HUD: climb rate & alt) @ 20 Hz
             master.mav.request_data_stream_send(
                 target_sys, target_comp,
-                mavutil.mavlink.MAV_DATA_STREAM_POSITION,
-                10, 1
+                mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+                20, 1
             )
-            # 4. ALL STREAMS fallback @ 10 Hz
+            # 3. ALL STREAMS fallback @ 10 Hz
             master.mav.request_data_stream_send(
                 target_sys, target_comp,
                 mavutil.mavlink.MAV_DATA_STREAM_ALL,
@@ -111,19 +108,26 @@ def mavlink_worker():
 
             # Request explicit message interval via MAVLink 2 if supported (50000 us = 20 Hz)
             try:
+                # SCALED_PRESSURE2 (ID 137)
                 master.mav.command_long_send(
                     target_sys, target_comp,
                     mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-                    0, 74, 50000, 0, 0, 0, 0, 0  # VFR_HUD (ID 74)
+                    0, 137, 50000, 0, 0, 0, 0, 0
+                )
+                # VFR_HUD (ID 74)
+                master.mav.command_long_send(
+                    target_sys, target_comp,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                    0, 74, 50000, 0, 0, 0, 0, 0
                 )
             except Exception:
                 pass
 
             last_msg_time = time.time()
-            last_vfr_time = 0.0
-            last_alt_time = 0.0
+            last_press_time = 0.0
             last_stream_req_time = time.time()
-            surface_pressure = None
+
+            has_scaled_pressure2 = False
 
             # Main fast receive loop - non-blocking queue drain to prevent UDP buffer lag
             while True:
@@ -134,11 +138,11 @@ def mavlink_worker():
                     try:
                         master.mav.request_data_stream_send(
                             target_sys, target_comp,
-                            mavutil.mavlink.MAV_DATA_STREAM_EXTRA2, 20, 1
+                            mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS, 20, 1
                         )
                         master.mav.request_data_stream_send(
                             target_sys, target_comp,
-                            mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS, 20, 1
+                            mavutil.mavlink.MAV_DATA_STREAM_EXTRA2, 20, 1
                         )
                     except Exception:
                         pass
@@ -160,51 +164,63 @@ def mavlink_worker():
                         with state_lock:
                             real_data['mavlink_connected'] = True
 
-                    # 1. PRIMARY: VFR_HUD (ArduSub standard for depth & climb rate, direct & immediate)
-                    elif msg_type == 'VFR_HUD':
-                        # In ArduSub, underwater altitude is negative depth (meters).
-                        # msg.alt is negative when submerged/pressed (e.g. -0.5m).
-                        depth_m = max(0.0, -float(msg.alt))
-                        rate_ms = -float(msg.climb)
-                        with state_lock:
-                            real_data['depth'] = depth_m
-                            real_data['rate'] = rate_ms
-                            real_data['mavlink_connected'] = True
-                        last_vfr_time = now
-
-                    # 2. HIGH PRECISION: ALTITUDE (MAVLink 2 message #141)
-                    elif msg_type == 'ALTITUDE':
-                        if hasattr(msg, 'altitude_relative'):
-                            depth_m = max(0.0, -float(msg.altitude_relative))
-                            with state_lock:
-                                real_data['depth'] = depth_m
-                                real_data['mavlink_connected'] = True
-                            last_alt_time = now
-
-                    # 3. DIRECT SENSOR PRESSURE: SCALED_PRESSURE2 (Bar30 external) or SCALED_PRESSURE
-                    elif msg_type in ('SCALED_PRESSURE2', 'SCALED_PRESSURE'):
+                    # 1. SCALED_PRESSURE2 (Murni sensor eksternal MS5837 / Bar30 BlueROV2)
+                    elif msg_type == 'SCALED_PRESSURE2':
+                        has_scaled_pressure2 = True
                         press_abs = getattr(msg, 'press_abs', None)
                         if press_abs is not None and press_abs > 500:
-                            if surface_pressure is None:
-                                surface_pressure = float(press_abs)
-                            
-                            # Fallback if VFR_HUD is not actively publishing
-                            if now - last_vfr_time > 1.0 and now - last_alt_time > 1.0:
-                                delta_p = max(0.0, float(press_abs) - surface_pressure)
-                                depth_m = delta_p / 98.0665
-                                with state_lock:
-                                    real_data['depth'] = depth_m
-                                    real_data['mavlink_connected'] = True
+                            last_press_time = now
+                            with state_lock:
+                                last_raw_press = float(press_abs)
 
-                    # 4. FALLBACK: GLOBAL_POSITION_INT (relative_alt in mm from EKF)
-                    elif msg_type == 'GLOBAL_POSITION_INT':
-                        # Only use as fallback when direct sensor streams (VFR_HUD/ALTITUDE) are absent
-                        if now - last_vfr_time > 1.0 and now - last_alt_time > 1.0:
-                            if hasattr(msg, 'relative_alt'):
-                                depth_m = max(0.0, -float(msg.relative_alt) / 1000.0)
-                                with state_lock:
-                                    real_data['depth'] = depth_m
-                                    real_data['mavlink_connected'] = True
+                                # Tare otomatis pada pembacaan pertama
+                                if SURFACE_PRESSURE is None:
+                                    SURFACE_PRESSURE = last_raw_press
+                                    print(f"[Sensor] Permukaan air dikalibrasi pada (SCALED_PRESSURE2): {SURFACE_PRESSURE:.2f} hPa")
+
+                                # Hitung selisih tekanan dari permukaan (hPa)
+                                delta_p = max(0.0, last_raw_press - SURFACE_PRESSURE)
+
+                                # Konversi hPa ke kedalaman meter (p_barom / 98.0665) untuk air tawar
+                                depth_m = delta_p / 98.0665
+                                real_data['depth'] = depth_m
+                                real_data['mavlink_connected'] = True
+
+                    # Fallback: SCALED_PRESSURE (hanya jika SCALED_PRESSURE2 tidak terdeteksi)
+                    elif msg_type == 'SCALED_PRESSURE' and not has_scaled_pressure2:
+                        press_abs = getattr(msg, 'press_abs', None)
+                        if press_abs is not None and press_abs > 500:
+                            last_press_time = now
+                            with state_lock:
+                                last_raw_press = float(press_abs)
+
+                                if SURFACE_PRESSURE is None:
+                                    SURFACE_PRESSURE = last_raw_press
+                                    print(f"[Sensor] Permukaan air dikalibrasi pada (SCALED_PRESSURE): {SURFACE_PRESSURE:.2f} hPa")
+
+                                delta_p = max(0.0, last_raw_press - SURFACE_PRESSURE)
+                                depth_m = delta_p / 98.0665
+                                real_data['depth'] = depth_m
+                                real_data['mavlink_connected'] = True
+
+                    # 2. VFR_HUD (Kecepatan vertikal / climb rate, dan fallback depth jika tidak ada SCALED_PRESSURE)
+                    elif msg_type == 'VFR_HUD':
+                        rate_ms = -float(msg.climb)
+                        with state_lock:
+                            real_data['rate'] = rate_ms
+                            real_data['mavlink_connected'] = True
+                            # Jika sensor tekanan murni (SCALED_PRESSURE2/1) tidak ada selama > 1s, gunakan alt dari VFR_HUD
+                            if now - last_press_time > 1.0:
+                                real_data['depth'] = max(0.0, -float(msg.alt))
+
+                    # 3. ALTITUDE (MAVLink 2 Message #141 fallback)
+                    elif msg_type == 'ALTITUDE':
+                        if hasattr(msg, 'altitude_relative') and now - last_press_time > 1.0:
+                            with state_lock:
+                                real_data['depth'] = max(0.0, -float(msg.altitude_relative))
+                                real_data['mavlink_connected'] = True
+
+                    # CATATAN: GLOBAL_POSITION_INT DIHAPUS DARI DEPTH AGAR TIDAK ADA DELAY / DRIFT DARI EKF ARDUSUB
 
                 # Disconnection tolerance (no message for > 5s)
                 if now - last_msg_time > 5.0:
@@ -271,6 +287,9 @@ def get_telemetry():
             # report true status regardless
             mavlink_connected = real_data['mavlink_connected']
 
+        cal_p = SURFACE_PRESSURE
+        raw_p = last_raw_press
+
     return jsonify({
         'source': source,
         'depth': round(depth, 4),
@@ -279,6 +298,29 @@ def get_telemetry():
         'mavlink_connected': mavlink_connected,
         'max_depth_m': MAX_DEPTH_M,
         'max_depth_cm': MAX_DEPTH_M * 100.0,
+        'surface_pressure_hpa': round(cal_p, 2) if cal_p is not None else None,
+        'raw_pressure_hpa': round(raw_p, 2) if raw_p is not None else None,
+    })
+
+
+@app.route('/api/calibrate', methods=['POST'])
+@app.route('/api/tare', methods=['POST'])
+def calibrate_surface():
+    """Tare / kalibrasi ulang tekanan permukaan agar kedalaman saat ini menjadi 0.0m"""
+    global SURFACE_PRESSURE
+    with state_lock:
+        if last_raw_press is not None:
+            SURFACE_PRESSURE = last_raw_press
+            real_data['depth'] = 0.0
+        else:
+            SURFACE_PRESSURE = None
+        cal = SURFACE_PRESSURE
+
+    print(f"[Sensor] Permukaan air di-tare ulang pada: {cal} hPa")
+    return jsonify({
+        'status': 'ok',
+        'message': f'Sensor di-tare ulang pada {cal} hPa',
+        'surface_pressure_hpa': cal
     })
 
 

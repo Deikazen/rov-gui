@@ -185,6 +185,30 @@ export const AltitudePanel: React.FC<AltitudePanelProps> = ({
             {telemetry.source.toUpperCase()}
           </button>
 
+          {telemetry.source === "real" && (
+            <button
+              onClick={async () => {
+                try {
+                  await fetch("http://127.0.0.1:5001/api/calibrate", { method: "POST" });
+                } catch (e) {
+                  console.error("Gagal tare sensor:", e);
+                }
+              }}
+              title="Tare / Nolkan pembacaan sensor kedalaman di permukaan saat ini"
+              style={{
+                padding: "2px 6px",
+                fontSize: "9px",
+                cursor: "pointer",
+                background: "#059669",
+                color: "#fff",
+                border: "none",
+                borderRadius: "3px",
+              }}
+            >
+              TARE
+            </button>
+          )}
+
           <span
             style={{
               color: telemetry.mavlink_connected
