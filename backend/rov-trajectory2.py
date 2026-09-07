@@ -36,15 +36,22 @@ LOGIKA ESTIMASI POSISI (X, Y, Z, YAW):
        * X = X + dx
        * Y = Y + dy
 
+CATATAN LOGGING (CSV & KONSOL):
+   - Baris log HANYA ditulis ketika wahana benar-benar BERGERAK
+     (surge dan/atau sway aktif di luar deadband PWM, atau kecepatan simulasi
+     dummy melebihi ambang MIN_SPEED_THRESHOLD). Saat wahana diam, tidak ada
+     baris baru yang ditulis, sehingga file trajectory_log.csv tetap ringkas.
+
 ================================================================================
 """
 
-import json
-import logging
+import time
 import math
 import threading
-import time
-import urllib.request
+import logging
+import csv
+import os
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from pymavlink import mavutil
@@ -54,10 +61,9 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 # ---------------------------------------------------------------------------
-# Konfigurasi Endpoint MAVLink, Ultrasonic & Server
+# Konfigurasi Endpoint MAVLink & Server
 # ---------------------------------------------------------------------------
 MAVLINK_UDP_ENDPOINT = 'udpin:0.0.0.0:14553'
-ULTRASONIC_ENDPOINT = 'http://127.0.0.1:8008/api/trajectory'
 HEARTBEAT_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 3.0
 HTTP_PORT = 8007
@@ -74,6 +80,56 @@ PWM_DEADBAND = 25  # Rentang (1475 - 1525 us) dianggap netral / motor diam
 K_SURGE = 0.001    # Faktor kecepatan Maju / Mundur (Servo 1 & 2)
 K_SWAY = 0.001     # Faktor kecepatan Kanan / Kiri (Servo 5)
 
+# Ambang kecepatan (m/s) untuk dianggap "bergerak" pada mode dummy simulasi
+MIN_SPEED_THRESHOLD = 0.001
+
+# ---------------------------------------------------------------------------
+# Konfigurasi File Log Trajectory (Riwayat Posisi)
+# ---------------------------------------------------------------------------
+# File log dibuat otomatis di folder yang sama dengan script ini.
+# Setiap kali server dijalankan (ulang), riwayat/log SEBELUMNYA otomatis
+# terhapus (file di-overwrite bersih) melalui init_log_file() di entrypoint.
+LOG_FILE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'trajectory_log.csv'
+)
+LOG_INTERVAL_S = 1.0  # (Tidak lagi dipakai untuk trigger; logging kini berbasis gerakan)
+log_lock = threading.Lock()
+
+
+def init_log_file():
+    """
+    Menyiapkan file log trajectory yang baru & bersih setiap kali program
+    dijalankan. Riwayat log dari sesi sebelumnya otomatis terhapus karena
+    file dibuka dalam mode 'w' (overwrite/truncate) di sini.
+    """
+    with log_lock:
+        with open(LOG_FILE_PATH, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp', 'source', 'x', 'y', 'z', 'yaw',
+                'v_surge', 'v_sway', 'servo1', 'servo2', 'servo5'
+            ])
+    print(f"[LOG] File log trajectory baru dibuat (riwayat lama dihapus): {LOG_FILE_PATH}")
+
+
+def log_trajectory(source, x, y, z, yaw, v_surge=0.0, v_sway=0.0,
+                    servo1=None, servo2=None, servo5=None):
+    """Menambahkan satu baris riwayat posisi ke file log trajectory (CSV)."""
+    try:
+        with log_lock:
+            with open(LOG_FILE_PATH, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                    source,
+                    round(x, 3), round(y, 3), round(z, 3), round(yaw, 1),
+                    round(v_surge, 3), round(v_sway, 3),
+                    servo1, servo2, servo5
+                ])
+    except Exception as e:
+        print(f"[LOG] Gagal menulis log trajectory: {e}")
+
+
 app = Flask(__name__)
 CORS(app)
 
@@ -89,9 +145,6 @@ real_data = {
     'z': 0.0,
     'yaw': 0.0,
     'mavlink_connected': False,
-    'ultrasonic_connected': False,
-    'sensor_1': None,
-    'sensor_2': None,
     'servo1': 1500,
     'servo2': 1500,
     'servo5': 1500,
@@ -127,63 +180,6 @@ def apply_deadband(val, neutral=PWM_NEUTRAL, deadband=PWM_DEADBAND):
     if abs(diff) <= deadband:
         return 0.0
     return float(diff)
-
-
-# ---------------------------------------------------------------------------
-# Ultrasonic Background Worker Thread (Sinkronisasi X, Y dari port 8008)
-# ---------------------------------------------------------------------------
-def ultrasonic_client_worker():
-    """
-    Sinkronisasi instan data posisi (X, Y) dari backend rov_ultrasonic.py (port 8008).
-    Menggunakan interval polling cepat (30ms) dan update independen agar posisi
-    langsung ter-update seketika data sensor masuk.
-    """
-    last_log_state = False
-    last_valid_time = 0.0
-
-    while True:
-        try:
-            req = urllib.request.Request(
-                ULTRASONIC_ENDPOINT,
-                headers={'User-Agent': 'ROV-Trajectory-Bridge'}
-            )
-            with urllib.request.urlopen(req, timeout=0.3) as resp:
-                if resp.status == 200:
-                    u_data = json.loads(resp.read().decode())
-                    is_u_ok = u_data.get('ultrasonic_connected', False)
-                    raw_x = u_data.get('raw_x')
-                    raw_y = u_data.get('raw_y')
-
-                    with state_lock:
-                        if is_u_ok:
-                            last_valid_time = time.time()
-                            real_data['ultrasonic_connected'] = True
-
-                            # Update X dan Y SECARA INDEPENDEN DAN INSTAN!
-                            if raw_x is not None:
-                                real_data['x'] = raw_x
-                            if raw_y is not None:
-                                real_data['y'] = raw_y
-
-                            real_data['sensor_1'] = u_data.get('sensor_1')
-                            real_data['sensor_2'] = u_data.get('sensor_2')
-
-                            if not last_log_state:
-                                print(
-                                    f"[ULTRASONIC BRIDGE] Terhubung ke {ULTRASONIC_ENDPOINT}! Posisi X & Y real-time aktif.")
-                                last_log_state = True
-                        else:
-                            if time.time() - last_valid_time > 2.0:
-                                real_data['ultrasonic_connected'] = False
-        except Exception:
-            with state_lock:
-                if time.time() - last_valid_time > 2.0:
-                    if last_log_state:
-                        print(
-                            "[ULTRASONIC BRIDGE] Koneksi ultrasonic terputus. Fallback ke Dead Reckoning MAVLink.")
-                        last_log_state = False
-                    real_data['ultrasonic_connected'] = False
-        time.sleep(0.03)  # 30ms (~33 Hz) respon instan tanpa lag
 
 
 # ---------------------------------------------------------------------------
@@ -327,20 +323,19 @@ def mavlink_worker():
                             dy = (v_surge * math.cos(yaw_rad) -
                                   v_sway * math.sin(yaw_rad)) * dt
 
-                            # 6. Akumulasi pergeseran posisi X dan Y (hanya jika sensor ultrasonic tidak aktif)
-                            if not real_data.get('ultrasonic_connected'):
-                                real_data['x'] += dx
-                                real_data['y'] += dy
+                            # 6. Akumulasi pergeseran posisi X dan Y
+                            real_data['x'] += dx
+                            real_data['y'] += dy
 
                             cur_x = real_data['x']
                             cur_y = real_data['y']
                             cur_z = real_data['z']
 
-                        # 7. Tampilkan log pergerakan ke terminal setiap 0.5 detik (di luar lock)
+                        # 7. Tampilkan log pergerakan ke terminal HANYA saat wahana benar-benar
+                        #    bergerak (surge dan/atau sway aktif di luar deadband) - di luar lock
                         if msg_type == 'SERVO_OUTPUT_RAW':
-                            now_log = time.time()
-                            if now_log - last_log_time >= 0.5:
-                                last_log_time = now_log
+                            is_moving = (dev_surge != 0.0) or (dev_sway != 0.0)
+                            if is_moving:
                                 surge_lbl = "MAJU" if dev_surge > 0 else (
                                     "MUNDUR" if dev_surge < 0 else "DIAM")
                                 sway_lbl = "KANAN" if dev_sway > 0 else (
@@ -349,6 +344,11 @@ def mavlink_worker():
                                     f"[DEAD RECKONING] S1:{s1} S2:{s2} S5:{s5} | "
                                     f"Surge:{surge_lbl} ({v_surge:+.2f}m/s) Sway:{sway_lbl} ({v_sway:+.2f}m/s) | "
                                     f"Yaw:{yaw_deg:05.1f}° | POS: (X:{cur_x:+.2f}m, Y:{cur_y:+.2f}m, Z:{cur_z:.2f}m)"
+                                )
+                                # Catat riwayat posisi ke file log trajectory (CSV)
+                                log_trajectory(
+                                    'real', cur_x, cur_y, cur_z, yaw_deg,
+                                    v_surge, v_sway, s1, s2, s5
                                 )
 
                 # Deteksi Timeout Komunikasi MAVLink
@@ -377,6 +377,7 @@ def mavlink_worker():
 def dummy_worker():
     """Menghasilkan pergerakan koordinat dummy berbentuk lintasan angka 8 untuk simulasi UI."""
     t0 = time.time()
+    last_log_time = time.time()
     while True:
         t = time.time() - t0
         speed = 0.22
@@ -397,6 +398,12 @@ def dummy_worker():
             dummy_data['y'] = y
             dummy_data['z'] = z
             dummy_data['yaw'] = yaw_deg
+
+        # Catat riwayat posisi dummy ke file log trajectory (CSV) HANYA saat
+        # kecepatan simulasi (magnitude dx,dy) melebihi ambang gerak minimum
+        speed_mag = math.hypot(dx, dy)
+        if speed_mag > MIN_SPEED_THRESHOLD:
+            log_trajectory('dummy', x, y, z, yaw_deg)
 
         time.sleep(0.05)
 
@@ -442,9 +449,6 @@ def get_telemetry():
             'origin_z': round(origin['z'], 3),
             'yaw': round(yaw, 1),
             'mavlink_connected': connected,
-            'ultrasonic_connected': real_data.get('ultrasonic_connected', False),
-            'sensor_1': real_data.get('sensor_1'),
-            'sensor_2': real_data.get('sensor_2'),
             'servo1': s1,
             'servo2': s2,
             'servo5': s5,
@@ -515,13 +519,13 @@ def set_source():
 # Entrypoint Aplikasi
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
+    # Bersihkan riwayat log trajectory sebelumnya & buat file log baru
+    init_log_file()
+
     mav_thread = threading.Thread(target=mavlink_worker, daemon=True)
     dummy_thread = threading.Thread(target=dummy_worker, daemon=True)
-    ultrasonic_thread = threading.Thread(
-        target=ultrasonic_client_worker, daemon=True)
     mav_thread.start()
     dummy_thread.start()
-    ultrasonic_thread.start()
 
     print(
         f"[ROV TRAJECTORY] Server Backend aktif pada http://127.0.0.1:{HTTP_PORT}")
