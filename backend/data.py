@@ -47,6 +47,7 @@ DATA_SERVER_PORT = 5000
 
 # Endpoint backend sensor
 DEPTH_WS_URL = "ws://127.0.0.1:5002"
+DEPTH_HTTP_URL = "http://127.0.0.1:5001/api/telemetry"  # fallback bila WS tidak tersedia
 TRAJECTORY_HTTP_URL = "http://127.0.0.1:8007/api/trajectory"
 ULTRASONIC_HTTP_URLS = [
     "http://127.0.0.1:8008/api/trajectory",  # Port cadangan (jika trajectory sudah pakai 8007)
@@ -56,6 +57,7 @@ ULTRASONIC_HTTP_URLS = [
 # Interval polling HTTP (detik)
 TRAJECTORY_POLL_INTERVAL = 0.1   # 10 Hz
 ULTRASONIC_POLL_INTERVAL = 0.1   # 10 Hz
+DEPTH_POLL_INTERVAL = 0.1        # 10 Hz (fallback HTTP)
 
 # Timeout koneksi HTTP (detik)
 HTTP_TIMEOUT = 2.0
@@ -272,6 +274,21 @@ def _ultrasonic_position_cm(distance_cm):
     return round(600.0 - distance_cm, 1) if distance_cm > 0 else None
 
 
+def _distance_to_cm(value, unit='cm'):
+    """Konversi jarak ke cm untuk format CSV/rov_ultrasonic.py."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if unit == 'mm':
+        return round(value / 10.0, 2)
+    if unit == 'm':
+        return round(value * 100.0, 2)
+    return round(value, 2)
+
+
 def sync_control_data(payload):
     """Ambil kontrol dari payload backend tanpa mencampurnya dengan koordinat posisi.
 
@@ -298,6 +315,14 @@ def sync_control_data(payload):
                 target['trigger']['buttons'] = max(0, int(buttons))
             except (TypeError, ValueError):
                 pass
+
+        # Pengirim simulator atau backend MAVLink dapat meneruskan PWM mentah
+        # servo 1--5 supaya data.csv selalu merekam lima kanal tersebut.
+        trajectory = system_data['trajectory_info']
+        for channel in range(1, 6):
+            key = f'servo{channel}'
+            if key in payload:
+                trajectory[key] = _pwm(payload[key], trajectory[key])
         target['last_update'] = time.time()
 
 
@@ -390,6 +415,30 @@ def start_depth_ws_client():
         on_close=on_depth_close,
     )
     ws.run_forever(reconnect=5)
+
+
+def depth_http_polling_worker():
+    """Fallback HTTP untuk rov-depth.py atau simulator tanpa WebSocket."""
+    session = requests.Session()
+    while True:
+        try:
+            response = session.get(DEPTH_HTTP_URL, timeout=HTTP_TIMEOUT)
+            if response.status_code == 200:
+                data = response.json()
+                with data_lock:
+                    info = system_data['depth_info']
+                    info['connected'] = True
+                    info['last_update'] = time.time()
+                    info['depth'] = data.get('depth', info['depth'])
+                    info['depth_cm'] = data.get('depth_cm', info['depth_cm'])
+                    info['rate'] = data.get('rate', info['rate'])
+                    info['source'] = data.get('source', info['source'])
+                    info['mavlink_connected'] = data.get('mavlink_connected', info['mavlink_connected'])
+                sync_depth_sensor(data.get('depth'))
+                log_data_csv()
+        except (requests.exceptions.RequestException, ValueError):
+            pass
+        time.sleep(DEPTH_POLL_INTERVAL)
 
 
 # ============================================================================
@@ -626,7 +675,6 @@ def receive_control():
     if not isinstance(payload, dict):
         return jsonify({'error': 'payload JSON object diperlukan'}), 400
     sync_control_data(payload)
-    log_data_csv()
     return get_rov_data()
 
 
@@ -639,11 +687,47 @@ def receive_sensor():
     with data_lock:
         sensor = system_data['rov_data']['sensor']
         if 'depth_sensor' in payload:
-            sensor['depth_sensor'] = _distance_to_m(payload['depth_sensor'], 'm')
+            depth_m = _distance_to_m(payload['depth_sensor'], 'm')
+            sensor['depth_sensor'] = depth_m
+            depth_info = system_data['depth_info']
+            depth_info['connected'] = True
+            depth_info['source'] = payload.get('source', 'simulator')
+            depth_info['depth'] = depth_m if depth_m is not None else depth_info['depth']
+            depth_info['depth_cm'] = round(depth_m * 100.0, 2) if depth_m is not None else depth_info['depth_cm']
+            depth_info['rate'] = payload.get('depth_rate_m_s', depth_info['rate'])
+            depth_info['last_update'] = time.time()
+
+        ultrasonic = system_data['ultrasonic_info']
+        ultrasonic['source'] = payload.get('source', ultrasonic['source'])
+        ultrasonic['connected'] = True
+        ultrasonic['ultrasonic_connected'] = True
         if 'us_front' in payload:
-            sensor['us_front'] = _distance_to_m(payload['us_front'], payload.get('us_front_unit', 'm'))
+            unit = payload.get('us_front_unit', 'm')
+            front_cm = _distance_to_cm(payload['us_front'], unit)
+            sensor['us_front'] = _distance_to_m(payload['us_front'], unit)
+            ultrasonic['sensor_1'] = {
+                'distance_cm': front_cm,
+                'distance_mm': round(front_cm * 10.0, 1) if front_cm is not None else None,
+                'status': payload.get('us_front_status', 'VALID'),
+                'target_axis': 'Y',
+            }
+            if front_cm is not None:
+                ultrasonic['raw_y'] = _ultrasonic_position_cm(front_cm)
+                ultrasonic['y'] = ultrasonic['raw_y']
         if 'us_down' in payload:
-            sensor['us_down'] = _distance_to_m(payload['us_down'], payload.get('us_down_unit', 'm'))
+            unit = payload.get('us_down_unit', 'm')
+            down_cm = _distance_to_cm(payload['us_down'], unit)
+            sensor['us_down'] = _distance_to_m(payload['us_down'], unit)
+            ultrasonic['sensor_2'] = {
+                'distance_cm': down_cm,
+                'distance_mm': round(down_cm * 10.0, 1) if down_cm is not None else None,
+                'status': payload.get('us_down_status', 'VALID'),
+                'target_axis': 'X',
+            }
+            if down_cm is not None:
+                ultrasonic['raw_x'] = _ultrasonic_position_cm(down_cm)
+                ultrasonic['x'] = ultrasonic['raw_x']
+        ultrasonic['last_update'] = time.time()
         system_data['rov_data']['last_update'] = time.time()
     log_data_csv()
     return get_rov_data()
@@ -706,7 +790,7 @@ if __name__ == '__main__':
     print("  DATA.PY - SERVER DATA PUSAT ROV")
     print("=" * 72)
     print(f"  REST API     : http://0.0.0.0:{DATA_SERVER_PORT}/api/all-data")
-    print(f"  Depth src    : {DEPTH_WS_URL} (WebSocket)")
+    print(f"  Depth src    : {DEPTH_WS_URL} (WebSocket), fallback {DEPTH_HTTP_URL}")
     print(f"  Trajectory   : {TRAJECTORY_HTTP_URL} (HTTP Polling)")
     print(f"  Ultrasonic   : auto-detect port 8007/8008 (HTTP Polling)")
     print("=" * 72)
@@ -716,6 +800,9 @@ if __name__ == '__main__':
     # 1. Thread WebSocket client ke rov-depth.py (port 5002)
     t_depth = threading.Thread(target=start_depth_ws_client, daemon=True, name="depth-ws")
     t_depth.start()
+
+    t_depth_http = threading.Thread(target=depth_http_polling_worker, daemon=True, name="depth-http-poll")
+    t_depth_http.start()
 
     # 2. Thread HTTP polling ke rov-trajectory2.py (port 8007)
     t_trajectory = threading.Thread(target=trajectory_polling_worker, daemon=True, name="trajectory-poll")
