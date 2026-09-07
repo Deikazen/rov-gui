@@ -32,9 +32,12 @@ import csv
 import os
 from datetime import datetime
 
-import websocket  # pip install websocket-client
+try:
+    import websocket  # pip install websocket-client
+except ImportError:
+    websocket = None
 import requests   # pip install requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # ---------------------------------------------------------------------------
@@ -76,181 +79,68 @@ werkzeug_log.setLevel(logging.ERROR)
 # Folder output CSV (dibuat otomatis di subfolder 'logs/' sejajar data.py)
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 
-# Interval minimum penulisan CSV per sensor (detik)
-# Agar file CSV tidak membengkak, data ditulis max 2 Hz (setiap 0.5 detik)
+# Satu file CSV gabungan untuk seluruh sesi dan semua sumber data.
+CSV_PATH = os.path.join(LOG_DIR, 'data.csv')
+
+# Agar file CSV tidak membengkak, data ditulis maksimal 2 Hz (setiap 0.5 detik).
 CSV_LOG_INTERVAL = 0.5
 
 # Lock khusus untuk operasi file CSV (terpisah dari data_lock agar tidak saling blokir)
 csv_lock = threading.Lock()
 
-# Timestamp terakhir penulisan CSV per sensor
-_last_csv_write = {
-    'depth': 0.0,
-    'trajectory': 0.0,
-    'ultrasonic': 0.0,
-}
-
-# Path file CSV aktif saat ini (diisi saat init)
-csv_paths = {
-    'depth': '',
-    'trajectory': '',
-    'ultrasonic': '',
-}
+_last_csv_write = 0.0
 
 
 def init_csv_logs():
-    """
-    Membuat folder logs/ dan file CSV baru dengan header untuk setiap sensor.
-    Nama file menggunakan timestamp sesi agar riwayat sesi sebelumnya tidak tertimpa.
-    Dipanggil sekali saat program dimulai.
-    """
+    """Siapkan satu file ``logs/data.csv`` tanpa menghapus data sesi lama."""
     os.makedirs(LOG_DIR, exist_ok=True)
-    session_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # ----- DEPTH CSV -----
-    csv_paths['depth'] = os.path.join(LOG_DIR, f'depth_{session_ts}.csv')
-    with open(csv_paths['depth'], mode='w', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow([
-            'timestamp', 'depth_m', 'depth_cm', 'rate_m_s',
-            'source', 'mavlink_connected',
-            'surface_pressure_hpa', 'raw_pressure_hpa',
-        ])
-
-    # ----- TRAJECTORY CSV -----
-    csv_paths['trajectory'] = os.path.join(LOG_DIR, f'trajectory_{session_ts}.csv')
-    with open(csv_paths['trajectory'], mode='w', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow([
-            'timestamp', 'source',
-            'x', 'y', 'z',
-            'raw_x', 'raw_y', 'raw_z',
-            'origin_x', 'origin_y', 'origin_z',
-            'yaw', 'mavlink_connected',
-            'servo1', 'servo2', 'servo5',
-            'v_surge', 'v_sway',
-        ])
-
-    # ----- ULTRASONIC CSV -----
-    csv_paths['ultrasonic'] = os.path.join(LOG_DIR, f'ultrasonic_{session_ts}.csv')
-    with open(csv_paths['ultrasonic'], mode='w', newline='', encoding='utf-8') as f:
-        csv.writer(f).writerow([
-            'timestamp', 'source', 'mapping_mode',
-            'x_cm', 'y_cm', 'z_cm',
-            'raw_x_cm', 'raw_y_cm',
-            'origin_x_cm', 'origin_y_cm',
-            's1_distance_cm', 's1_distance_mm', 's1_status',
-            's2_distance_cm', 's2_distance_mm', 's2_status',
-            'ultrasonic_connected',
-        ])
-
-    print(f"[CSV] Folder log  : {LOG_DIR}")
-    print(f"[CSV] Depth log   : {os.path.basename(csv_paths['depth'])}")
-    print(f"[CSV] Trajectory  : {os.path.basename(csv_paths['trajectory'])}")
-    print(f"[CSV] Ultrasonic  : {os.path.basename(csv_paths['ultrasonic'])}")
+    if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
+        with open(CSV_PATH, mode='w', newline='', encoding='utf-8') as f:
+            csv.writer(f).writerow([
+                'timestamp',
+                'servo1_pwm', 'servo2_pwm', 'servo3_pwm', 'servo4_pwm', 'servo5_pwm',
+                'x_surge_pwm', 'y_sway_pwm', 'z_heave_pwm', 'r_yaw_pwm', 'buttons',
+                'depth_sensor_m', 'depth_sensor_cm', 'depth_rate_m_s',
+                'us_front_cm', 'us_front_mm', 'us_front_position_y_cm', 'us_front_status',
+                'us_down_cm', 'us_down_mm', 'us_down_position_x_cm', 'us_down_status',
+            ])
+    print(f"[CSV] Data gabungan: {CSV_PATH}")
 
 
-def log_depth_csv():
-    """Menulis satu baris data depth ke file CSV jika interval terpenuhi."""
+def log_data_csv():
+    """Simpan satu snapshot gabungan ke ``data.csv``."""
+    global _last_csv_write
     now = time.time()
-    if now - _last_csv_write['depth'] < CSV_LOG_INTERVAL:
+    if now - _last_csv_write < CSV_LOG_INTERVAL:
         return
-    _last_csv_write['depth'] = now
+    _last_csv_write = now
 
     with data_lock:
-        info = system_data['depth_info']
+        rov = system_data['rov_data']
+        trajectory = system_data['trajectory_info']
+        depth = system_data['depth_info']
+        ultrasonic = system_data['ultrasonic_info']
+        s1 = ultrasonic['sensor_1']
+        s2 = ultrasonic['sensor_2']
+        s1_cm = s1.get('distance_cm')
+        s2_cm = s2.get('distance_cm')
         row = [
             datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-            round(info['depth'], 4),
-            round(info['depth_cm'], 2),
-            round(info['rate'], 4),
-            info['source'],
-            info['mavlink_connected'],
-            info['surface_pressure_hpa'],
-            info['raw_pressure_hpa'],
+            trajectory['servo1'], trajectory['servo2'], trajectory['servo3'],
+            trajectory['servo4'], trajectory['servo5'],
+            rov['actuator']['x'], rov['actuator']['y'], rov['actuator']['z'],
+            rov['actuator']['r'], rov['trigger']['buttons'],
+            depth['depth'], depth['depth_cm'], depth['rate'],
+            s1_cm, s1.get('distance_mm'), _ultrasonic_position_cm(s1_cm), s1.get('status', 'N/A'),
+            s2_cm, s2.get('distance_mm'), _ultrasonic_position_cm(s2_cm), s2.get('status', 'N/A'),
         ]
 
     try:
         with csv_lock:
-            with open(csv_paths['depth'], mode='a', newline='', encoding='utf-8') as f:
+            with open(CSV_PATH, mode='a', newline='', encoding='utf-8') as f:
                 csv.writer(f).writerow(row)
-    except Exception as e:
-        print(f"[CSV] Gagal menulis depth log: {e}")
-
-
-def log_trajectory_csv():
-    """Menulis satu baris data trajectory ke file CSV jika interval terpenuhi."""
-    now = time.time()
-    if now - _last_csv_write['trajectory'] < CSV_LOG_INTERVAL:
-        return
-    _last_csv_write['trajectory'] = now
-
-    with data_lock:
-        info = system_data['trajectory_info']
-        row = [
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-            info['source'],
-            round(info['x'], 3),
-            round(info['y'], 3),
-            round(info['z'], 3),
-            round(info['raw_x'], 3),
-            round(info['raw_y'], 3),
-            round(info['raw_z'], 3),
-            round(info['origin_x'], 3),
-            round(info['origin_y'], 3),
-            round(info['origin_z'], 3),
-            round(info['yaw'], 1),
-            info['mavlink_connected'],
-            info['servo1'],
-            info['servo2'],
-            info['servo5'],
-            round(info['v_surge'], 3),
-            round(info['v_sway'], 3),
-        ]
-
-    try:
-        with csv_lock:
-            with open(csv_paths['trajectory'], mode='a', newline='', encoding='utf-8') as f:
-                csv.writer(f).writerow(row)
-    except Exception as e:
-        print(f"[CSV] Gagal menulis trajectory log: {e}")
-
-
-def log_ultrasonic_csv():
-    """Menulis satu baris data ultrasonic ke file CSV jika interval terpenuhi."""
-    now = time.time()
-    if now - _last_csv_write['ultrasonic'] < CSV_LOG_INTERVAL:
-        return
-    _last_csv_write['ultrasonic'] = now
-
-    with data_lock:
-        info = system_data['ultrasonic_info']
-        s1 = info['sensor_1']
-        s2 = info['sensor_2']
-        row = [
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-            info['source'],
-            info['mapping_mode'],
-            round(info['x'], 1),
-            round(info['y'], 1),
-            round(info['z'], 1),
-            round(info['raw_x'], 1),
-            round(info['raw_y'], 1),
-            round(info['origin_x'], 1),
-            round(info['origin_y'], 1),
-            s1.get('distance_cm'),
-            s1.get('distance_mm'),
-            s1.get('status', 'N/A'),
-            s2.get('distance_cm'),
-            s2.get('distance_mm'),
-            s2.get('status', 'N/A'),
-            info['ultrasonic_connected'],
-        ]
-
-    try:
-        with csv_lock:
-            with open(csv_paths['ultrasonic'], mode='a', newline='', encoding='utf-8') as f:
-                csv.writer(f).writerow(row)
-    except Exception as e:
-        print(f"[CSV] Gagal menulis ultrasonic log: {e}")
+    except OSError as e:
+        print(f"[CSV] Gagal menulis data.csv: {e}")
 
 # ---------------------------------------------------------------------------
 # Penyimpanan Data Terpusat (Thread-Safe)
@@ -258,6 +148,26 @@ def log_ultrasonic_csv():
 data_lock = threading.Lock()
 
 system_data = {
+    # ---- FORMAT TELEMETRI ROV UTAMA ----
+    # Nilai PWM selalu dibatasi pada 1100--1900.  Nilai 1500 berarti netral.
+    # Data ini diperbarui dari backend lain melalui fungsi sync_* di bawah.
+    'rov_data': {
+        'actuator': {
+            'x': 1500,  # surge: maju/mundur
+            'y': 1500,  # sway: kiri/kanan
+            'z': 1500,  # heave: naik/turun
+            'r': 1500,  # yaw: putar kiri/kanan
+        },
+        'trigger': {
+            'buttons': 0,  # bitmask tombol gamepad
+        },
+        'sensor': {
+            'depth_sensor': None,  # meter, dari Pixhawk
+            'us_front': None,      # meter, ultrasonik depan
+            'us_down': None,       # meter, ultrasonik bawah
+        },
+        'last_update': 0.0,
+    },
     # ---- DEPTH (dari rov-depth.py via WebSocket port 5002) ----
     'depth_info': {
         'connected': False,
@@ -290,6 +200,8 @@ system_data = {
         'mavlink_connected': False,
         'servo1': 1500,
         'servo2': 1500,
+        'servo3': 1500,
+        'servo4': 1500,
         'servo5': 1500,
         'v_surge': 0.0,
         'v_sway': 0.0,
@@ -332,6 +244,90 @@ system_data = {
 }
 
 
+def _pwm(value, default=1500):
+    """Normalisasi satu nilai aktuator menjadi PWM aman (1100--1900)."""
+    try:
+        return max(1100, min(1900, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _distance_to_m(value, unit='cm'):
+    """Konversi jarak ultrasonik ke meter; None tetap menandakan data belum ada."""
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value / 1000.0 if unit == 'mm' else value / 100.0 if unit == 'cm' else value
+
+
+def _ultrasonic_position_cm(distance_cm):
+    """Rumus continuous dari rov_ultrasonic.py: posisi = 600 - jarak(cm)."""
+    try:
+        distance_cm = float(distance_cm)
+    except (TypeError, ValueError):
+        return None
+    return round(600.0 - distance_cm, 1) if distance_cm > 0 else None
+
+
+def sync_control_data(payload):
+    """Ambil kontrol dari payload backend tanpa mencampurnya dengan koordinat posisi.
+
+    Sumber dapat mengirim ``actuator``/``trigger`` atau field datar
+    ``pwm_x``, ``pwm_y``, ``pwm_z``, ``pwm_r``, dan ``buttons``.
+    """
+    actuator = payload.get('actuator', {}) if isinstance(payload, dict) else {}
+    trigger = payload.get('trigger', {}) if isinstance(payload, dict) else {}
+    if not isinstance(actuator, dict):
+        actuator = {}
+    if not isinstance(trigger, dict):
+        trigger = {}
+
+    with data_lock:
+        target = system_data['rov_data']
+        for axis in ('x', 'y', 'z', 'r'):
+            value = actuator.get(axis, payload.get(f'pwm_{axis}'))
+            if value is not None:
+                target['actuator'][axis] = _pwm(value, target['actuator'][axis])
+
+        buttons = trigger.get('buttons', payload.get('buttons'))
+        if buttons is not None:
+            try:
+                target['trigger']['buttons'] = max(0, int(buttons))
+            except (TypeError, ValueError):
+                pass
+        target['last_update'] = time.time()
+
+
+def sync_depth_sensor(depth_m):
+    with data_lock:
+        system_data['rov_data']['sensor']['depth_sensor'] = _distance_to_m(depth_m, 'm')
+        system_data['rov_data']['last_update'] = time.time()
+
+
+def sync_ultrasonic_sensors(sensor_1, sensor_2):
+    """Petakan sensor_1=depan dan sensor_2=bawah dari rov_ultrasonic.py.
+
+    Kedua sumber dapat mengirim ``distance_m``, ``distance_cm``, atau
+    ``distance_mm``. Ubah pemetaan ini bila kabel sensor fisik ditukar.
+    """
+    def as_m(sensor):
+        if not isinstance(sensor, dict):
+            return None
+        for field, unit in (('distance_m', 'm'), ('distance_cm', 'cm'), ('distance_mm', 'mm')):
+            if field in sensor:
+                return _distance_to_m(sensor[field], unit)
+        return None
+
+    with data_lock:
+        target = system_data['rov_data']['sensor']
+        target['us_front'] = as_m(sensor_1)
+        target['us_down'] = as_m(sensor_2)
+        system_data['rov_data']['last_update'] = time.time()
+
+
 # ============================================================================
 # 1. WEBSOCKET CLIENT UNTUK DEPTH (PORT 5002)
 # ============================================================================
@@ -353,11 +349,14 @@ def on_depth_message(ws, message):
             info['max_depth_cm'] = data.get('max_depth_cm', info['max_depth_cm'])
             info['surface_pressure_hpa'] = data.get('surface_pressure_hpa', info['surface_pressure_hpa'])
             info['raw_pressure_hpa'] = data.get('raw_pressure_hpa', info['raw_pressure_hpa'])
+        # depth dari rov-depth.py sudah dalam satuan meter
+        sync_depth_sensor(data.get('depth'))
+        sync_control_data(data)
     except Exception as e:
         print(f"[Depth WS] Error parsing message: {e}")
     else:
         # Catat ke CSV setelah data berhasil diperbarui
-        log_depth_csv()
+        log_data_csv()
 
 
 def on_depth_open(ws):
@@ -380,6 +379,9 @@ def on_depth_close(ws, close_status_code, close_msg):
 
 def start_depth_ws_client():
     """Membuat dan menjalankan WebSocket client ke rov-depth.py (port 5002)."""
+    if websocket is None:
+        print("[Depth WS] websocket-client belum terpasang; depth WebSocket dilewati.")
+        return
     ws = websocket.WebSocketApp(
         DEPTH_WS_URL,
         on_open=on_depth_open,
@@ -421,11 +423,26 @@ def trajectory_polling_worker():
                     info['mavlink_connected'] = data.get('mavlink_connected', info['mavlink_connected'])
                     info['servo1'] = data.get('servo1', info['servo1'])
                     info['servo2'] = data.get('servo2', info['servo2'])
+                    info['servo3'] = data.get('servo3', info['servo3'])
+                    info['servo4'] = data.get('servo4', info['servo4'])
                     info['servo5'] = data.get('servo5', info['servo5'])
                     info['v_surge'] = data.get('v_surge', info['v_surge'])
                     info['v_sway'] = data.get('v_sway', info['v_sway'])
+                # rov-trajectory2.py menyediakan PWM surge di servo 1/2 dan
+                # PWM sway di servo 5. Z/R tetap nilai terakhir sampai sumber
+                # kontrol mengirim pwm_z/pwm_r atau objek actuator.
+                surge = (_pwm(data.get('servo1')) + _pwm(data.get('servo2'))) / 2
+                sync_control_data({
+                    'pwm_x': surge,
+                    'pwm_y': data.get('servo5', 1500),
+                    'pwm_z': data.get('servo3'),
+                    'pwm_r': data.get('servo4'),
+                    'buttons': data.get('buttons'),
+                    'actuator': data.get('actuator', {}),
+                    'trigger': data.get('trigger', {}),
+                })
                 # Catat ke CSV setelah data berhasil diperbarui
-                log_trajectory_csv()
+                log_data_csv()
             else:
                 with data_lock:
                     system_data['trajectory_info']['connected'] = False
@@ -497,6 +514,14 @@ def ultrasonic_polling_worker():
                             if 'pool_size' in data:
                                 info['pool_size'] = data['pool_size']
                             info['history_points'] = data.get('history_points', info['history_points'])
+                        # Konvensi payload saat ini: sensor_1=depan,
+                        # sensor_2=bawah. Semua nilai yang dipublikasikan
+                        # data.py dinormalisasi ke meter.
+                        sync_ultrasonic_sensors(
+                            data.get('sensor_1'), data.get('sensor_2')
+                        )
+                        sync_control_data(data)
+                        log_data_csv()
                         success = True
                         break
             except requests.exceptions.ConnectionError:
@@ -566,6 +591,64 @@ def get_all_data():
         return jsonify(system_data)
 
 
+@app.route('/api/data', methods=['GET'])
+def get_rov_data():
+    """Format ringkas untuk kontrol dan evaluasi kondisi ROV.
+
+    ``x/y/z/r`` adalah PWM (1100--1900), ``buttons`` adalah bitmask, dan
+    semua jarak sensor menggunakan meter.
+    """
+    with data_lock:
+        rov = system_data['rov_data']
+        return jsonify({
+            **rov['actuator'],
+            **rov['trigger'],
+            **rov['sensor'],
+            'unit': {
+                'actuator': 'pwm_us',
+                'depth_sensor': 'm',
+                'us_front': 'm',
+                'us_down': 'm',
+            },
+            'last_update': rov['last_update'],
+        })
+
+
+@app.route('/api/control', methods=['POST'])
+def receive_control():
+    """Terima data kontrol dari file/backend gamepad lain.
+
+    Contoh payload: {"actuator":{"x":1600,"y":1500,"z":1500,"r":1400},
+    "trigger":{"buttons":1}}. Field datar ``pwm_x`` s.d. ``pwm_r`` juga
+    didukung agar mudah dipakai oleh pengirim MAVLink yang sudah ada.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'payload JSON object diperlukan'}), 400
+    sync_control_data(payload)
+    log_data_csv()
+    return get_rov_data()
+
+
+@app.route('/api/sensor', methods=['POST'])
+def receive_sensor():
+    """Terima pembaruan sensor langsung dari file pembaca sensor bila diperlukan."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'error': 'payload JSON object diperlukan'}), 400
+    with data_lock:
+        sensor = system_data['rov_data']['sensor']
+        if 'depth_sensor' in payload:
+            sensor['depth_sensor'] = _distance_to_m(payload['depth_sensor'], 'm')
+        if 'us_front' in payload:
+            sensor['us_front'] = _distance_to_m(payload['us_front'], payload.get('us_front_unit', 'm'))
+        if 'us_down' in payload:
+            sensor['us_down'] = _distance_to_m(payload['us_down'], payload.get('us_down_unit', 'm'))
+        system_data['rov_data']['last_update'] = time.time()
+    log_data_csv()
+    return get_rov_data()
+
+
 @app.route('/api/depth', methods=['GET'])
 def get_depth():
     """Endpoint khusus data depth saja."""
@@ -627,6 +710,8 @@ if __name__ == '__main__':
     print(f"  Trajectory   : {TRAJECTORY_HTTP_URL} (HTTP Polling)")
     print(f"  Ultrasonic   : auto-detect port 8007/8008 (HTTP Polling)")
     print("=" * 72)
+
+    init_csv_logs()
 
     # 1. Thread WebSocket client ke rov-depth.py (port 5002)
     t_depth = threading.Thread(target=start_depth_ws_client, daemon=True, name="depth-ws")
