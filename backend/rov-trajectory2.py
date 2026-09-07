@@ -147,6 +147,8 @@ real_data = {
     'mavlink_connected': False,
     'servo1': 1500,
     'servo2': 1500,
+    'servo3': 1500,
+    'servo4': 1500,
     'servo5': 1500,
     'v_surge': 0.0,
     'v_sway': 0.0,
@@ -280,13 +282,19 @@ def mavlink_worker():
                             if dt > 1.0 or dt <= 0.0:
                                 dt = 0.05  # Default ~20 Hz
 
-                            # 1. Baca nilai PWM dari Servo 1, 2, dan 5
+                            # 1. Baca nilai PWM dari Servo 1 sampai 5.
+                            # Servo 1/2 dipakai untuk surge dan servo 5 untuk
+                            # sway; servo 3/4 tetap diteruskan ke data.py.
                             s1 = int(getattr(msg, 'servo1_raw', PWM_NEUTRAL))
                             s2 = int(getattr(msg, 'servo2_raw', PWM_NEUTRAL))
+                            s3 = int(getattr(msg, 'servo3_raw', PWM_NEUTRAL))
+                            s4 = int(getattr(msg, 'servo4_raw', PWM_NEUTRAL))
                             s5 = int(getattr(msg, 'servo5_raw', PWM_NEUTRAL))
 
                             real_data['servo1'] = s1
                             real_data['servo2'] = s2
+                            real_data['servo3'] = s3
+                            real_data['servo4'] = s4
                             real_data['servo5'] = s5
 
                             # 2. Hitung deviasi PWM terhadap titik netral (1500 us) + filter deadband
@@ -422,6 +430,8 @@ def get_telemetry():
             connected = real_data['mavlink_connected']
             s1 = real_data['servo1']
             s2 = real_data['servo2']
+            s3 = real_data['servo3']
+            s4 = real_data['servo4']
             s5 = real_data['servo5']
             v_surge = real_data['v_surge']
             v_sway = real_data['v_sway']
@@ -429,7 +439,7 @@ def get_telemetry():
             raw_x, raw_y, raw_z = dummy_data['x'], dummy_data['y'], dummy_data['z']
             yaw = dummy_data['yaw']
             connected = real_data['mavlink_connected']
-            s1, s2, s5 = 1500, 1500, 1500
+            s1, s2, s3, s4, s5 = 1500, 1500, 1500, 1500, 1500
             v_surge, v_sway = 0.0, 0.0
 
         rel_x = raw_x - origin['x']
@@ -451,6 +461,8 @@ def get_telemetry():
             'mavlink_connected': connected,
             'servo1': s1,
             'servo2': s2,
+            'servo3': s3,
+            'servo4': s4,
             'servo5': s5,
             'v_surge': round(v_surge, 3),
             'v_sway': round(v_sway, 3),
