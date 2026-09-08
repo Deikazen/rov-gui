@@ -23,10 +23,10 @@ export interface QrHistoryEntry {
 }
 
 // Ambil dari .env: VITE_QR_WS_URL (lihat frontend/.env.example)
-// Fallback ke localhost:8091 kalau env belum di-set.
+// Fallback ke localhost:8083 kalau env belum di-set.
 const QR_WS_URL =
   (import.meta.env.VITE_QR_WS_URL as string | undefined) ??
-  "ws://localhost:8091/ws/qr/status";
+  "ws://localhost:8083/ws/qr/status";
 
 const RECONNECT_DELAY_MS = 2000;
 // Batas jumlah riwayat yang disimpan di memori browser, biar tidak

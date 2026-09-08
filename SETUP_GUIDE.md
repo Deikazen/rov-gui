@@ -608,7 +608,7 @@ lsof -i :5001    # macOS/Linux
 kill -9 <PID>
 
 # Or use different port
-python rov-depth.py --port 5002
+python rov-depth.py --port 8081
 ```
 
 ### Frontend Won't Connect to Backend

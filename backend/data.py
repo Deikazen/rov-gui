@@ -4,7 +4,7 @@ DATA.PY - SERVER DATA PUSAT (CENTRAL DATA HUB)
 ================================================================================
 Deskripsi:
 Mengumpulkan SELURUH data sensor ROV dari berbagai backend:
-  1. DEPTH       <- WebSocket client ke rov-depth.py (ws://127.0.0.1:5002)
+  1. DEPTH       <- WebSocket client ke rov-depth.py (ws://127.0.0.1:8081)
   2. TRAJECTORY  <- HTTP polling ke rov-trajectory2.py (http://127.0.0.1:8007/api/trajectory)
   3. ULTRASONIC  <- HTTP polling ke rov_ultrasonic.py (http://127.0.0.1:8007/api/trajectory
                     atau http://127.0.0.1:8008/api/trajectory jika port 8007 sudah dipakai)
@@ -17,7 +17,7 @@ Menyediakan REST API terpusat di port 5000 untuk dikonsumsi Frontend:
   GET /api/status         -> Status koneksi semua backend
 
 Cara Menjalankan:
-  1. Jalankan rov-depth.py          (WS server di port 5002)
+  1. Jalankan rov-depth.py          (WS server di port 8081)
   2. Jalankan rov-trajectory2.py    (REST API di port 8007)
   3. Jalankan rov_ultrasonic.py     (REST API di port 8007/8008 + WS server di port 8765)
   4. Jalankan data.py               (Server pusat di port 5000)
@@ -46,7 +46,7 @@ from flask_cors import CORS
 DATA_SERVER_PORT = 5000
 
 # Endpoint backend sensor
-DEPTH_WS_URL = "ws://127.0.0.1:5002"
+DEPTH_WS_URL = "ws://127.0.0.1:8081"
 DEPTH_HTTP_URL = "http://127.0.0.1:5001/api/telemetry"  # fallback bila WS tidak tersedia
 TRAJECTORY_HTTP_URL = "http://127.0.0.1:8007/api/trajectory"
 ULTRASONIC_HTTP_URLS = [
@@ -170,7 +170,7 @@ system_data = {
         },
         'last_update': 0.0,
     },
-    # ---- DEPTH (dari rov-depth.py via WebSocket port 5002) ----
+    # ---- DEPTH (dari rov-depth.py via WebSocket port 8081) ----
     'depth_info': {
         'connected': False,
         'depth': 0.0,
@@ -354,7 +354,7 @@ def sync_ultrasonic_sensors(sensor_1, sensor_2):
 
 
 # ============================================================================
-# 1. WEBSOCKET CLIENT UNTUK DEPTH (PORT 5002)
+# 1. WEBSOCKET CLIENT UNTUK DEPTH (PORT 8081)
 # ============================================================================
 def on_depth_message(ws, message):
     """Callback: setiap kali rov-depth.py push data telemetri via WebSocket."""
@@ -403,7 +403,7 @@ def on_depth_close(ws, close_status_code, close_msg):
 
 
 def start_depth_ws_client():
-    """Membuat dan menjalankan WebSocket client ke rov-depth.py (port 5002)."""
+    """Membuat dan menjalankan WebSocket client ke rov-depth.py (port 8081)."""
     if websocket is None:
         print("[Depth WS] websocket-client belum terpasang; depth WebSocket dilewati.")
         return
@@ -797,7 +797,7 @@ if __name__ == '__main__':
 
     init_csv_logs()
 
-    # 1. Thread WebSocket client ke rov-depth.py (port 5002)
+    # 1. Thread WebSocket client ke rov-depth.py (port 8081)
     t_depth = threading.Thread(target=start_depth_ws_client, daemon=True, name="depth-ws")
     t_depth.start()
 

@@ -12,7 +12,7 @@ export interface DepthTelemetryData {
   raw_pressure_hpa?: number | null;
 }
 
-const WS_DEPTH_URL = "ws://127.0.0.1:5002";
+const WS_DEPTH_URL = "ws://127.0.0.1:8081";
 const HTTP_DEPTH_URL = "http://127.0.0.1:5001/api/telemetry";
 const HTTP_SOURCE_URL = "http://127.0.0.1:5001/api/source";
 const HTTP_TARE_URL = "http://127.0.0.1:5001/api/tare";
@@ -57,7 +57,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
     }));
   }, []);
 
-  // 1. WebSocket Real-time Push Stream (Port 5002) - Latensi < 5ms
+  // 1. WebSocket Real-time Push Stream (Port 8081) - Latensi < 5ms
   useEffect(() => {
     let isMounted = true;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,7 +70,7 @@ export function useDepth(fallbackSimDepth: number = 0) {
 
         ws.onopen = () => {
           if (!isMounted) return;
-          console.log("[WS DEPTH] Terhubung ke ws://127.0.0.1:5002 (Real-time telemetry stream active)");
+          console.log("[WS DEPTH] Terhubung ke ws://127.0.0.1:8081 (Real-time telemetry stream active)");
           isWsConnectedRef.current = true;
         };
 

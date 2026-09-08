@@ -5,7 +5,7 @@ Serves index.html (untouched, separate file) and exposes:
   GET  /api/telemetry  -> current depth/rate/source data as JSON (HTTP polling fallback)
   POST /api/source     -> switch between "real" (Pixhawk/MAVLink) and "dummy" data
   POST /api/tare       -> tare/zero depth at current surface pressure
-  WS   ws://0.0.0.0:5002 -> real-time push telemetry stream (< 5ms latency)
+  WS   ws://0.0.0.0:8081 -> real-time push telemetry stream (< 5ms latency)
 
 Reads MAVLink telemetry over UDP from BlueOS.
 
@@ -37,7 +37,7 @@ MAX_DEPTH_M = 2.0                              # matches frontend default maxDep
 HEARTBEAT_TIMEOUT_S = 10.0
 RECV_TIMEOUT_S = 2.0
 RECONNECT_DELAY_S = 3.0
-WS_PORT = 5002
+WS_PORT = 8081
 
 app = Flask(__name__)
 CORS(app)
@@ -65,7 +65,7 @@ SURFACE_PRESSURE = None
 last_raw_press = None
 
 # ---------------------------------------------------------------------------
-# WebSocket Server (Port 5002) for Ultra-Low Latency Telemetry Streaming (< 5ms)
+# WebSocket Server (Port 8081) for Ultra-Low Latency Telemetry Streaming (< 5ms)
 # ---------------------------------------------------------------------------
 connected_ws_clients = set()
 ws_loop = None

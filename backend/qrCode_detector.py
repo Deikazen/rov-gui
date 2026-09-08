@@ -33,7 +33,7 @@ Install dependency:
 
 Jalankan:
     python3 qr_proxy.py
-    # atau: uvicorn qr_proxy:app --host 0.0.0.0 --port 8091
+    # atau: uvicorn qr_proxy:app --host 0.0.0.0 --port 8083
 """
 
 import asyncio
@@ -180,8 +180,8 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
 
-    print("[QR PROXY] Aktif di http://0.0.0.0:8091")
+    print("[QR PROXY] Aktif di http://0.0.0.0:8083")
     print(f"[QR PROXY] Polling dari: {JETSON_QR_STATUS_URL}")
     print(f"[QR PROXY] Interval: {POLL_INTERVAL_ACTIVE}s (aktif) / {POLL_INTERVAL_IDLE}s (idle)")
     print("[QR PROXY] Endpoints: GET /api/qr/status  |  WS /ws/qr/status")
-    uvicorn.run(app, host="0.0.0.0", port=8091)
+    uvicorn.run(app, host="0.0.0.0", port=8083)
