@@ -3,3 +3,6 @@ venv
 /__pycache__
 backend/logs/
 backend/trajectory_log.csv
+
+logs/
+trajectory_log.csv
