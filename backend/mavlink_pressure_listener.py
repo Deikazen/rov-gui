@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Menerima tekanan dari BATTERY_STATUS Battery 2 melalui MAVLink UDP.
+"""Menerima tekanan air dari BATTERY_STATUS Battery 2 melalui MAVLink UDP.
 
 BlueOS harus mengirim MAVLink ke alamat/port lokal ini, misalnya:
     UDP Client -> <IP komputer ini>:14550
@@ -35,6 +35,8 @@ def pressure_from_message(message):
     if not voltages:
         return None
 
+    # Sensor tekanan air 1.2 MPa pada ADC 6.6 V dipetakan ke Battery 2.
+    # Nilai voltages[0] telah dikalibrasi oleh konfigurasi ArduSub menjadi BAR.
     pressure_bar = voltages[0]
     # MAVLink menggunakan UINT16_MAX untuk sebuah voltage yang tidak diketahui.
     if pressure_bar in (None, INVALID_VOLTAGE):
@@ -44,7 +46,7 @@ def pressure_from_message(message):
 
 
 def listen(endpoint):
-    """Dengarkan stream MAVLink selamanya dan cetak tekanan Battery 2."""
+    """Dengarkan stream MAVLink selamanya dan cetak tekanan air Battery 2."""
     while True:
         connection = None
         try:
@@ -58,7 +60,7 @@ def listen(endpoint):
 
                 pressure_bar = pressure_from_message(message)
                 if pressure_bar is not None:
-                    print(f"Tekanan (Battery 2, id=1): {pressure_bar:.3f} BAR")
+                    print(f"Tekanan air (Battery 2, id=1): {pressure_bar:.3f} BAR")
         except KeyboardInterrupt:
             print("\nListener dihentikan.")
             return
@@ -76,7 +78,7 @@ def listen(endpoint):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Tampilkan tekanan BAR dari BATTERY_STATUS id=1 (Battery 2)."
+        description="Tampilkan tekanan air (BAR) dari BATTERY_STATUS id=1 (Battery 2)."
     )
     parser.add_argument(
         "--endpoint",
