@@ -33,7 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Bisa di-override lewat environment variable tanpa ubah kode, contoh:
 #   JETSON_CAM2_URL="http://192.168.99.244:9011/video_feed" python3 webcam.py
 JETSON_CAM2_URL = os.environ.get(
-    "JETSON_CAM2_URL", "http://192.168.99.244:9011/video_feed"
+    "JETSON_CAM2_URL", "http://192.168.137.196:9011/video_feed"
 )
 
 # Origin frontend yang boleh akses proxy ini. "*" gampang untuk development,

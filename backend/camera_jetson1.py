@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Kalau proxy ini satu jaringan lokal dengan Jetson, pakai IP LOKAL Jetson,
 # misal: "http://192.168.1.50:9010/video_feed"
 # Kalau beda jaringan (remote), baru pakai IP ZeroTier seperti sebelumnya.
-JETSON_CAM1_URL = "http://10.147.48.168:9010/video_feed"
+JETSON_CAM1_URL = "http://192.168.137.196:9010/video_feed"
 # JETSON_CAM2_URL = "http://<ip-jetson-kedua-jika-ada>:9010/video_feed"
 
 # Timeout baca per-chunk. Kalau upstream diam lebih lama dari ini, dianggap
