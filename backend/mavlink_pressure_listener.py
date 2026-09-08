@@ -1,25 +1,18 @@
-#!/usr/bin/env python3
-"""Menerima tekanan air dari BATTERY_STATUS Battery 2 melalui MAVLink UDP.
+"""Menerima tekanan tangki ballast dari BATTERY_STATUS Battery 2 melalui MAVLink UDP.
 
 BlueOS harus mengirim MAVLink ke alamat/port lokal ini, misalnya:
-    UDP Client -> <IP komputer ini>:14550
+    UDP Client -> <IP komputer ini>:14554
 
 Jalankan:
     python mavlink_pressure_listener.py
 atau:
-    python mavlink_pressure_listener.py --endpoint udpin:0.0.0.0:14552
-
-Catatan: field ``voltages`` dalam BATTERY_STATUS secara formal bertipe uint16
-(umumnya millivolt). Skrip ini sengaja mencetak ``voltages[0]`` langsung sebagai
-BAR, sesuai konfigurasi ArduSub/BlueOS pada sistem ini yang telah mengalibrasi
-nilai Battery 2 menjadi tekanan BAR sebelum dikirim.
+    python mavlink_pressure_listener.py --endpoint udpin:0.0.0.0:14554
 """
 
 import argparse
 import time
 
 from pymavlink import mavutil
-
 
 DEFAULT_ENDPOINT = "udpin:0.0.0.0:14554"
 BATTERY_2_ID = 1
@@ -32,21 +25,31 @@ def pressure_from_message(message):
         return None
 
     voltages = message.voltages
-    if not voltages:
+    if not voltages or len(voltages) == 0:
         return None
 
-    # Sensor tekanan air 1.2 MPa pada ADC 6.6 V dipetakan ke Battery 2.
-    # Nilai voltages[0] telah dikalibrasi oleh konfigurasi ArduSub menjadi BAR.
-    pressure_bar = voltages[0]
-    # MAVLink menggunakan UINT16_MAX untuk sebuah voltage yang tidak diketahui.
-    if pressure_bar in (None, INVALID_VOLTAGE):
+    raw_value = voltages[0]
+    
+    # MAVLink menggunakan UINT16_MAX (65535) untuk nilai yang tidak diketahui.
+    if raw_value in (None, INVALID_VOLTAGE):
         return None
 
-    return float(pressure_bar)
+    # 1. Dapatkan pembacaan dasar dari konversi MAVLink (milivolt ke nilai dasar)
+    calculated_value = float(raw_value) / 1000.0
+    
+    # 2. Kalibrasi Hardware Offset untuk memaksa udara bebas menjadi 0 BAR.
+    # Dikompensasi langsung dari sisa kelebihan 1.104 BAR dan dikali 10.0 untuk skala BAR penuh.
+    pressure_bar = (calculated_value - 1.104) * 10.0
+    
+    # Batasi agar noise fluktuasi negatif tipis di udara bebas tetap terbaca 0.0
+    if pressure_bar < 0:
+        pressure_bar = 0.0
+        
+    return pressure_bar
 
 
 def listen(endpoint):
-    """Dengarkan stream MAVLink selamanya dan cetak tekanan air Battery 2."""
+    """Dengarkan stream MAVLink selamanya dan cetak tekanan tangki ballast Battery 2."""
     while True:
         connection = None
         try:
@@ -60,12 +63,11 @@ def listen(endpoint):
 
                 pressure_bar = pressure_from_message(message)
                 if pressure_bar is not None:
-                    print(f"Tekanan air (Battery 2, id=1): {pressure_bar:.3f} BAR")
+                    print(f"Tekanan Tangki Ballast (Battery 2, id=1): {pressure_bar:.3f} BAR")
         except KeyboardInterrupt:
             print("\nListener dihentikan.")
             return
         except Exception as error:
-            # Jangan biarkan satu frame/koneksi rusak menghentikan pembacaan stream.
             print(f"Error MAVLink: {error}. Mencoba menyambung ulang dalam 2 detik...")
             time.sleep(2)
         finally:
@@ -78,7 +80,7 @@ def listen(endpoint):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Tampilkan tekanan air (BAR) dari BATTERY_STATUS id=1 (Battery 2)."
+        description="Tampilkan tekanan tangki ballast (BAR) dari BATTERY_STATUS id=1."
     )
     parser.add_argument(
         "--endpoint",
