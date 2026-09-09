@@ -19,6 +19,8 @@ SERVICES = (
     ("trajectory", "rov-trajectory.py"),
     ("depth", "rov-depth.py"),
     ("ultrasonic", "rov_ultrasonic.py"),
+    ("water pressure", "mavlink_pressure_listener.py"),
+    ("model 3D", "model_3d.py" )
 )
 
 
